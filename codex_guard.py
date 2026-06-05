@@ -25,6 +25,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 ROOT = Path(__file__).resolve().parent
 DATA_FILE = ROOT / "classroom_central_bank_data.json"
 LAST_REPORT = ROOT / "codex_guard_last_run.txt"
+LAST_STARTUP_REPORT = ROOT / "codex_start_currency_last_run.txt"
+STARTUP_CHAT_TRANSCRIPT = ROOT / "codex_start_currency_chat.json"
 
 
 @dataclass
@@ -419,6 +421,197 @@ def codex_prompt(data_path: Path, data: Dict[str, Any], checks: List[CheckResult
     ).strip()
 
 
+def startup_prompt(data_path: Path, data: Dict[str, Any], checks: List[CheckResult]) -> str:
+    data_json = json.dumps(data, indent=2, sort_keys=True)
+    if len(data_json) > 100_000:
+        data_json = data_json[:100_000] + "\n... TRUNCATED: focus on visible starter data plus local checks ..."
+    return textwrap.dedent(
+        f"""
+        You are helping a teacher start a classroom currency in the Classroom Central Bank app.
+        This is NOT a source-code review. Do not suggest code changes.
+
+        Use the classroom data below to create a practical startup plan for the teacher.
+        Focus on classroom economy setup and math entered through the GUI:
+        - a currency name and short symbol the class can use
+        - which sample accounts to rename, delete, or add
+        - reasonable starter balances or first central-bank injections
+        - a simple opening policy rate, reserve requirement, inflation target, and warning threshold
+        - the first few transactions or class activities to record
+        - any setup mistakes or confusing starter values to recheck
+
+        Return a concise teacher-facing report with:
+        1. Starter verdict: Ready, Needs setup, or Check first.
+        2. Recommended currency setup.
+        3. Accounts to create or rename.
+        4. Suggested starting balances and first money-supply move.
+        5. First week operating plan.
+        6. GUI fields or entries to update next.
+
+        Rules:
+        - Do not edit files.
+        - Do not ask for or mention OpenAI API keys.
+        - Keep numbers simple enough for a classroom to follow.
+        - Explain when a suggestion creates new currency versus moves existing currency.
+        - Use the local deterministic checks as evidence, but do your own reasoning too.
+
+        Data file: {data_path}
+
+        Computed summary:
+        {json.dumps(economy_summary(data), indent=2, sort_keys=True)}
+
+        Local deterministic checks:
+        {format_checks(checks)}
+
+        Classroom economy JSON:
+        ```json
+        {data_json}
+        ```
+        """
+    ).strip()
+
+
+def startup_chat_prompt(
+    data_path: Path,
+    data: Dict[str, Any],
+    checks: List[CheckResult],
+    history: List[Dict[str, str]],
+    user_message: str,
+) -> str:
+    data_json = json.dumps(data, indent=2, sort_keys=True)
+    if len(data_json) > 90_000:
+        data_json = data_json[:90_000] + "\n... TRUNCATED: focus on visible starter data plus local checks ..."
+    recent_history = history[-16:]
+    return textwrap.dedent(
+        f"""
+        You are Codex inside a teacher-facing startup chat for the Classroom Central Bank app.
+        The teacher is starting a classroom currency and expects a back-and-forth conversation.
+        This is NOT a source-code review. Do not suggest code changes.
+
+        Your job in this chat:
+        - ask useful setup questions when needed, at most two questions in one reply
+        - suggest currency names, short symbols, account setup, starter balances, and first transactions
+        - explain whether a suggestion creates new currency or only moves existing currency
+        - help the teacher decide GUI values for policy rate, reserve requirement, inflation target, and warning threshold
+        - point out classroom economy data or math entries that look confusing or risky
+
+        Rules:
+        - Do not edit files.
+        - Do not ask for or mention OpenAI API keys.
+        - Keep the response conversational and concise.
+        - Reply directly to the teacher's latest message.
+        - If enough information is available, give concrete next GUI steps.
+        - If information is missing, ask the next one or two setup questions.
+
+        Data file: {data_path}
+
+        Computed summary:
+        {json.dumps(economy_summary(data), indent=2, sort_keys=True)}
+
+        Local deterministic checks:
+        {format_checks(checks)}
+
+        Conversation so far:
+        {json.dumps(recent_history, indent=2, sort_keys=True)}
+
+        Teacher's latest message:
+        {user_message}
+
+        Classroom economy JSON:
+        ```json
+        {data_json}
+        ```
+        """
+    ).strip()
+
+
+def load_chat_history(path: Path) -> List[Dict[str, str]]:
+    if not path.exists():
+        return []
+    try:
+        incoming = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(incoming, list):
+        return []
+    history: List[Dict[str, str]] = []
+    for row in incoming:
+        if not isinstance(row, dict):
+            continue
+        role = str(row.get("role", "")).strip()
+        content = str(row.get("content", "")).strip()
+        if role in {"user", "assistant"} and content:
+            history.append({"role": role, "content": content})
+    return history[-80:]
+
+
+def write_chat_history(path: Path, history: List[Dict[str, str]]) -> None:
+    path.write_text(json.dumps(history[-80:], indent=2) + "\n", encoding="utf-8")
+
+
+def codex_missing_message() -> str:
+    return textwrap.dedent(
+        """
+        Codex CLI was not found from this process.
+
+        Install Codex, then run:
+          codex login
+
+        Choose ChatGPT/OpenAI sign-in. This project does not need an OpenAI API key.
+        """
+    ).strip()
+
+
+def run_codex_for_text(prompt: str, running_message: str, echo: bool = True) -> Tuple[int, str]:
+    codex = find_command("codex")
+    if not codex:
+        message = codex_missing_message()
+        if echo:
+            print(message)
+        return 127, message
+
+    command = [
+        codex,
+        "exec",
+        "-C",
+        str(ROOT),
+        "-m",
+        "gpt-5.5",
+        "-c",
+        'model_reasoning_effort="xhigh"',
+        "-c",
+        'approval_policy="never"',
+        "-s",
+        "read-only",
+        prompt,
+    ]
+    if echo:
+        print(running_message)
+    code, output = run_command(command, timeout=1800)
+    if output and echo:
+        print(output)
+    if code != 0:
+        hint = (
+            "\nCodex did not complete successfully. If this is an auth problem, run `codex login` "
+            "and choose ChatGPT/OpenAI sign-in; no API key is needed for this project."
+        )
+        if echo:
+            print(hint)
+        output = ((output or "") + "\n" + hint).strip()
+    return code, output or ""
+
+
+def run_codex_prompt(
+    prompt: str,
+    local_report: str,
+    report_path: Path,
+    running_message: str,
+) -> int:
+    code, output = run_codex_for_text(prompt, running_message)
+    report = local_report + "\n\n" + (output or "")
+    report_path.write_text(report + "\n", encoding="utf-8")
+    return code
+
+
 def review_economy(args: argparse.Namespace) -> int:
     data_path = Path(args.data_file).expanduser().resolve()
     data, error = load_data(data_path)
@@ -435,49 +628,85 @@ def review_economy(args: argparse.Namespace) -> int:
         LAST_REPORT.write_text(local_report + "\n", encoding="utf-8")
         return 0
 
-    codex = find_command("codex")
-    if not codex:
-        message = textwrap.dedent(
-            """
-            Codex CLI was not found from this process.
+    prompt = codex_prompt(data_path, data, checks)
+    return run_codex_prompt(
+        prompt,
+        local_report,
+        LAST_REPORT,
+        f"[{timestamp()}] Running Codex economy check with gpt-5.5 / xhigh / read-only.",
+    )
 
-            Install Codex, then run:
-              codex login
 
-            Choose ChatGPT/OpenAI sign-in. This project does not need an OpenAI API key.
+def start_currency(args: argparse.Namespace) -> int:
+    data_path = Path(args.data_file).expanduser().resolve()
+    data, error = load_data(data_path)
+    if error or data is None:
+        message = f"[Info] Economy startup help: {error}"
+        print(message)
+        LAST_STARTUP_REPORT.write_text(message + "\n", encoding="utf-8")
+        return 0 if args.local_only else 1
+
+    checks = local_economy_checks(data)
+    local_report = f"[{timestamp()}] Local startup context\n{format_checks(checks)}"
+    print(local_report)
+    if args.local_only:
+        LAST_STARTUP_REPORT.write_text(local_report + "\n", encoding="utf-8")
+        return 0
+
+    prompt = startup_prompt(data_path, data, checks)
+    return run_codex_prompt(
+        prompt,
+        local_report,
+        LAST_STARTUP_REPORT,
+        f"[{timestamp()}] Running Codex startup help with gpt-5.5 / xhigh / read-only.",
+    )
+
+
+def startup_chat(args: argparse.Namespace) -> int:
+    data_path = Path(args.data_file).expanduser().resolve()
+    chat_path = Path(args.chat_file).expanduser().resolve() if args.chat_file else STARTUP_CHAT_TRANSCRIPT
+    user_message = str(args.message or "").strip()
+    if not user_message:
+        user_message = "Help me start my classroom currency. Please ask me what you need to know first."
+
+    data, error = load_data(data_path)
+    if error or data is None:
+        response = f"[Info] Economy startup chat: {error}"
+        print(response)
+        LAST_STARTUP_REPORT.write_text(response + "\n", encoding="utf-8")
+        return 0 if args.local_only else 1
+
+    checks = local_economy_checks(data)
+    local_report = f"[{timestamp()}] Local startup chat context\n{format_checks(checks)}"
+    if not args.reply_only:
+        print(local_report)
+    history = load_chat_history(chat_path)
+
+    if args.local_only:
+        response = textwrap.dedent(
+            f"""
+            Local-only startup chat preview.
+
+            I can see {len(active_accounts(data))} active account(s), a money supply of {money_supply(data):,.2f}, and {len(transactions(data))} transaction(s).
+            Next, I would ask what grade level or class theme you want, then suggest a currency name, symbol, starter accounts, and opening balances.
             """
         ).strip()
-        LAST_REPORT.write_text(local_report + "\n\n" + message + "\n", encoding="utf-8")
-        print(message)
-        return 127
+        print(response)
+        write_chat_history(chat_path, history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": response}])
+        LAST_STARTUP_REPORT.write_text(local_report + "\n\n" + response + "\n", encoding="utf-8")
+        return 0
 
-    prompt = codex_prompt(data_path, data, checks)
-    command = [
-        codex,
-        "exec",
-        "-C",
-        str(ROOT),
-        "-m",
-        "gpt-5.5",
-        "-c",
-        'model_reasoning_effort="xhigh"',
-        "-c",
-        'approval_policy="never"',
-        "-s",
-        "read-only",
+    prompt = startup_chat_prompt(data_path, data, checks, history, user_message)
+    code, output = run_codex_for_text(
         prompt,
-    ]
-    print(f"[{timestamp()}] Running Codex economy check with gpt-5.5 / xhigh / read-only.")
-    code, output = run_command(command, timeout=1800)
-    report = local_report + "\n\n" + (output or "")
-    LAST_REPORT.write_text(report + "\n", encoding="utf-8")
-    if output:
+        f"[{timestamp()}] Running Codex startup chat with gpt-5.5 / xhigh / read-only.",
+        echo=not args.reply_only,
+    )
+    LAST_STARTUP_REPORT.write_text(local_report + "\n\n" + (output or "") + "\n", encoding="utf-8")
+    if args.reply_only:
         print(output)
-    if code != 0:
-        print(
-            "\nCodex did not complete successfully. If this is an auth problem, run `codex login` "
-            "and choose ChatGPT/OpenAI sign-in; no API key is needed for this project."
-        )
+    if code == 0:
+        write_chat_history(chat_path, history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": output}])
     return code
 
 
@@ -517,11 +746,20 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--local-only", action="store_true", help="Run deterministic local economy checks without invoking Codex.")
     parser.add_argument("--economy-review", action="store_true", help="Explicitly run a Codex economy review.")
     parser.add_argument("--codex-review", action="store_true", help="Compatibility alias for --economy-review.")
+    parser.add_argument("--startup-help", action="store_true", help="Ask Codex for a classroom currency startup plan.")
+    parser.add_argument("--startup-chat", action="store_true", help="Send one teacher message to the Codex startup chat.")
+    parser.add_argument("--chat-file", default=str(STARTUP_CHAT_TRANSCRIPT), help="JSON transcript file for startup chat.")
+    parser.add_argument("--message", default="", help="Teacher message for --startup-chat.")
+    parser.add_argument("--reply-only", action="store_true", help="For --startup-chat, print only Codex's reply.")
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    if args.startup_chat:
+        return startup_chat(args)
+    if args.startup_help:
+        return start_currency(args)
     if args.watch:
         return watch(args)
     return review_economy(args)

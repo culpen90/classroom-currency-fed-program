@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -38,6 +39,8 @@ except Exception as exc:  # pragma: no cover
 APP_NAME = "Classroom Central Bank"
 APP_VERSION = "1.0"
 DATA_FILENAME = "classroom_central_bank_data.json"
+STARTUP_CHAT_MARKER_FILENAME = ".classroom_central_bank_startup_chat_seen"
+STARTUP_CHAT_FILENAME = "codex_start_currency_chat.json"
 
 ACCOUNT_TYPES = [
     "Student",
@@ -357,6 +360,9 @@ class CentralBankStore:
     def create_demo_reset(self) -> None:
         self.data = self.default_data()
         self.save()
+
+    def looks_ready_for_startup_chat(self) -> bool:
+        return not self.transactions and not self.loans and len(self.price_index) <= 1
 
     def account_by_id(self, account_id: str) -> Optional[Dict[str, Any]]:
         for account in self.accounts:
@@ -928,6 +934,8 @@ class ClassroomCentralBankApp:
             pass
 
         self.store = CentralBankStore()
+        self.startup_chat_marker = app_dir() / STARTUP_CHAT_MARKER_FILENAME
+        self.startup_chat_file = app_dir() / STARTUP_CHAT_FILENAME
         self.status_var = tk.StringVar(value="Ready")
         self.metric_vars: Dict[str, tk.StringVar] = {}
         self.account_form_vars: Dict[str, tk.StringVar] = {}
@@ -938,6 +946,11 @@ class ClassroomCentralBankApp:
         self.codex_check_after_id: Optional[str] = None
         self.codex_check_running = False
         self.codex_check_pending_reason = ""
+        self.codex_result_queue: queue.Queue[Tuple[str, int, str, str, bool]] = queue.Queue()
+        self.startup_chat_window: Optional[tk.Toplevel] = None
+        self.startup_chat_text: Optional[tk.Text] = None
+        self.startup_chat_input: Optional[tk.Text] = None
+        self.startup_chat_send_button: Optional[ttk.Button] = None
 
         self._setup_styles()
         self._build_shell()
@@ -952,6 +965,8 @@ class ClassroomCentralBankApp:
         self.refresh_all()
         if self.store.load_warning:
             self.root.after(150, lambda: self.show_info(self.store.load_warning))
+        self.root.after(650, self.maybe_offer_codex_startup_chat)
+        self.root.after(200, self.process_codex_result_queue)
 
     def _setup_styles(self) -> None:
         style = ttk.Style()
@@ -1316,6 +1331,7 @@ class ClassroomCentralBankApp:
         ttk.Button(buttons, text="Create Backup", command=self.create_backup).grid(row=0, column=2, padx=5)
         ttk.Button(buttons, text="Reset Demo Data", command=self.reset_demo_data).grid(row=0, column=3, padx=5)
         ttk.Button(buttons, text="Run Codex Economy Check", command=self.run_codex_economy_check).grid(row=0, column=4, padx=5)
+        ttk.Button(buttons, text="Start Codex Chat", command=self.open_codex_startup_chat).grid(row=0, column=5, padx=5)
 
         audit_frame = ttk.LabelFrame(container, text="Audit checks", padding=8)
         audit_frame.grid(row=1, column=0, sticky="nsew")
@@ -1335,6 +1351,9 @@ class ClassroomCentralBankApp:
         tab = self._make_tab("How to Use")
         help_box = ScrollableText(tab, height=20)
         help_box.grid(row=0, column=0, sticky="nsew")
+        actions = ttk.Frame(tab)
+        actions.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(actions, text="Chat with Codex to Start Currency", command=self.open_codex_startup_chat).grid(row=0, column=0, sticky="w")
         help_text = f"""
 {APP_NAME}
 
@@ -2014,6 +2033,268 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
         except Exception as exc:
             self.show_error(f"Could not reset data: {exc}")
 
+    def maybe_offer_codex_startup_chat(self) -> None:
+        if self.startup_chat_marker.exists():
+            return
+        if not self.store.looks_ready_for_startup_chat():
+            return
+        try:
+            self.notebook.select(0)
+        except Exception:
+            pass
+        message = (
+            "This looks like a new classroom currency. Open a Codex chat to help you start it?\n\n"
+            "You can chat back and forth with Codex about currency settings, accounts, "
+            "starting balances, and first transactions. Codex will use the local Codex CLI "
+            "and your `codex login` session. "
+            "This app will not ask for an API key."
+        )
+        self.mark_codex_startup_chat_seen()
+        if messagebox.askyesno("Start your currency with Codex", message):
+            self.open_codex_startup_chat(start_with_codex=True)
+        else:
+            self.status_var.set("Codex startup chat skipped.")
+
+    def mark_codex_startup_chat_seen(self) -> None:
+        try:
+            self.startup_chat_marker.write_text(f"Shown at {now_stamp()}\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    def open_codex_startup_chat(self, start_with_codex: bool = False) -> None:
+        if self.startup_chat_window is not None:
+            try:
+                if self.startup_chat_window.winfo_exists():
+                    self.startup_chat_window.deiconify()
+                    self.startup_chat_window.lift()
+                    self.startup_chat_window.focus_force()
+                    if start_with_codex and not self.load_startup_chat_history():
+                        self.send_codex_startup_chat_message(
+                            "Help me start my classroom currency. Please ask me what you need to know first."
+                        )
+                    return
+            except Exception:
+                pass
+
+        window = tk.Toplevel(self.root)
+        window.title("Codex Startup Chat")
+        window.geometry("840x680")
+        window.minsize(640, 480)
+        window.transient(self.root)
+        self.startup_chat_window = window
+
+        frame = ttk.Frame(window, padding=10)
+        frame.grid(row=0, column=0, sticky="nsew")
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        ttk.Label(frame, text="Codex Startup Chat", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+
+        transcript = ScrollableText(frame, height=22)
+        transcript.grid(row=1, column=0, sticky="nsew", pady=(8, 8))
+        transcript.text.tag_configure("speaker", font=("TkDefaultFont", 10, "bold"))
+        transcript.text.tag_configure("codex", foreground="#24527a")
+        transcript.text.tag_configure("app", foreground="#666666")
+        transcript.text.configure(state="disabled")
+        self.startup_chat_text = transcript.text
+
+        input_frame = ttk.Frame(frame)
+        input_frame.grid(row=2, column=0, sticky="ew")
+        input_frame.columnconfigure(0, weight=1)
+        self.startup_chat_input = tk.Text(input_frame, height=4, wrap="word")
+        self.startup_chat_input.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.startup_chat_input.bind("<Control-Return>", lambda _event: self.send_codex_startup_chat_message())
+
+        button_frame = ttk.Frame(input_frame)
+        button_frame.grid(row=0, column=1, sticky="ns")
+        self.startup_chat_send_button = ttk.Button(button_frame, text="Send", command=self.send_codex_startup_chat_message)
+        self.startup_chat_send_button.grid(row=0, column=0, sticky="ew")
+        ttk.Button(button_frame, text="Clear Chat", command=self.clear_codex_startup_chat).grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        ttk.Button(button_frame, text="Close", command=self.close_codex_startup_chat).grid(row=2, column=0, sticky="ew", pady=(6, 0))
+
+        history = self.load_startup_chat_history()
+        if history:
+            for row in history:
+                speaker = "You" if row.get("role") == "user" else "Codex"
+                self.append_startup_chat_message(speaker, row.get("content", ""))
+        else:
+            self.append_startup_chat_message(
+                "App",
+                "Tell Codex your grade level, classroom theme, or how students should earn currency. "
+                "Codex can ask follow-up questions and help you choose the first settings.",
+            )
+
+        window.protocol("WM_DELETE_WINDOW", self.close_codex_startup_chat)
+        self.startup_chat_input.focus_set()
+        if start_with_codex and not history:
+            self.send_codex_startup_chat_message(
+                "Help me start my classroom currency. Please ask me what you need to know first."
+            )
+
+    def close_codex_startup_chat(self) -> None:
+        window = self.startup_chat_window
+        self.startup_chat_window = None
+        self.startup_chat_text = None
+        self.startup_chat_input = None
+        self.startup_chat_send_button = None
+        if window is not None:
+            try:
+                window.destroy()
+            except Exception:
+                pass
+
+    def load_startup_chat_history(self) -> List[Dict[str, str]]:
+        if not self.startup_chat_file.exists():
+            return []
+        try:
+            incoming = json.loads(self.startup_chat_file.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if not isinstance(incoming, list):
+            return []
+        history: List[Dict[str, str]] = []
+        for row in incoming:
+            if not isinstance(row, dict):
+                continue
+            role = str(row.get("role", "")).strip()
+            content = str(row.get("content", "")).strip()
+            if role in {"user", "assistant"} and content:
+                history.append({"role": role, "content": content})
+        return history[-80:]
+
+    def clear_codex_startup_chat(self) -> None:
+        if not messagebox.askyesno("Clear Codex chat", "Clear the startup chat transcript?"):
+            return
+        try:
+            if self.startup_chat_file.exists():
+                self.startup_chat_file.unlink()
+        except Exception:
+            pass
+        if self.startup_chat_text is not None:
+            self.startup_chat_text.configure(state="normal")
+            self.startup_chat_text.delete("1.0", "end")
+            self.startup_chat_text.configure(state="disabled")
+        self.append_startup_chat_message("App", "Startup chat cleared.")
+        self.status_var.set("Codex startup chat cleared.")
+
+    def append_startup_chat_message(self, speaker: str, message: str) -> None:
+        if self.startup_chat_text is None:
+            return
+        text = self.startup_chat_text
+        tag = "codex" if speaker == "Codex" else "app" if speaker == "App" else ""
+        text.configure(state="normal")
+        text.insert("end", f"{speaker}: ", ("speaker", tag) if tag else ("speaker",))
+        text.insert("end", f"{message.strip()}\n\n", (tag,) if tag else ())
+        text.configure(state="disabled")
+        text.see("end")
+
+    def set_startup_chat_controls(self, enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
+        if self.startup_chat_input is not None:
+            self.startup_chat_input.configure(state=state)
+        if self.startup_chat_send_button is not None:
+            self.startup_chat_send_button.configure(state=state)
+
+    def send_codex_startup_chat_message(self, message: Optional[str] = None) -> None:
+        if self.codex_check_running:
+            self.codex_status_var.set("Codex is already running. Try the startup chat after the current Codex check finishes.")
+            self.append_startup_chat_message("App", "Codex is already running. Try again after the current Codex check finishes.")
+            return
+        if message is None:
+            if self.startup_chat_input is None:
+                return
+            message = self.startup_chat_input.get("1.0", "end").strip()
+            if not message:
+                return
+            self.startup_chat_input.delete("1.0", "end")
+        else:
+            message = message.strip()
+            if not message:
+                return
+
+        self.codex_check_running = True
+        self.store.save()
+        self.append_startup_chat_message("You", message)
+        self.set_startup_chat_controls(False)
+        self.codex_status_var.set("Codex startup chat running.")
+        self.status_var.set("Codex startup chat waiting for a reply.")
+        guard = app_dir() / "codex_guard.py"
+        if not guard.exists():
+            self.finish_codex_startup_chat_message(1, f"Codex guard was not found at {guard}.")
+            return
+
+        def worker() -> None:
+            try:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(guard),
+                        "--once",
+                        "--startup-chat",
+                        "--data-file",
+                        str(self.store.path),
+                        "--chat-file",
+                        str(self.startup_chat_file),
+                        "--message",
+                        message,
+                        "--reply-only",
+                    ],
+                    cwd=str(app_dir()),
+                    text=True,
+                    capture_output=True,
+                    timeout=1800,
+                )
+                output = ((completed.stdout or "") + (completed.stderr or "")).strip()
+                self.codex_result_queue.put(("startup_chat", completed.returncode, "", output, False))
+            except Exception as exc:
+                error = str(exc)
+                self.codex_result_queue.put(("startup_chat", 1, "", error, False))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_codex_startup_chat_message(self, returncode: int, output: str) -> None:
+        self.codex_check_running = False
+        self.set_startup_chat_controls(True)
+        if returncode == 0:
+            reply = output.strip() or "Codex finished, but did not return a reply."
+            self.append_startup_chat_message("Codex", reply)
+            self.codex_status_var.set(f"Codex startup chat replied at {now_stamp()}.")
+            self.status_var.set("Codex startup chat replied.")
+            if self.startup_chat_input is not None:
+                self.startup_chat_input.focus_set()
+            if self.codex_check_pending_reason:
+                self.schedule_codex_economy_check(self.codex_check_pending_reason)
+            return
+
+        summary = output[-1200:] if output else "No output was captured."
+        message = (
+            "Codex startup chat did not finish successfully. "
+            "Run `codex login` and choose ChatGPT/OpenAI sign-in if authentication is needed. "
+            "This project does not need an API key. "
+        )
+        self.codex_status_var.set(message)
+        self.status_var.set("Codex startup chat did not finish.")
+        self.append_startup_chat_message("App", f"{message}\n\nLast output:\n{summary}")
+        if self.codex_check_pending_reason:
+            self.schedule_codex_economy_check(self.codex_check_pending_reason)
+
+    def process_codex_result_queue(self) -> None:
+        while True:
+            try:
+                kind, returncode, report_text, output, manual = self.codex_result_queue.get_nowait()
+            except queue.Empty:
+                break
+            if kind == "startup_chat":
+                self.finish_codex_startup_chat_message(returncode, output)
+            elif kind == "economy_check":
+                self.finish_codex_economy_check(returncode, Path(report_text), output, manual)
+        try:
+            self.root.after(200, self.process_codex_result_queue)
+        except Exception:
+            pass
+
     def schedule_codex_economy_check(self, reason: str) -> None:
         self.codex_check_pending_reason = reason
         self.codex_status_var.set(f"Codex economy check queued: {reason}.")
@@ -2064,10 +2345,10 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
                 output = ((completed.stdout or "") + (completed.stderr or "")).strip()
                 report = app_dir() / "codex_guard_last_run.txt"
                 report.write_text(output + "\n", encoding="utf-8")
-                self.root.after(0, lambda: self.finish_codex_economy_check(completed.returncode, report, output, manual))
+                self.codex_result_queue.put(("economy_check", completed.returncode, str(report), output, manual))
             except Exception as exc:
                 message = str(exc)
-                self.root.after(0, lambda: self.finish_codex_economy_check(1, app_dir() / "codex_guard_last_run.txt", message, manual))
+                self.codex_result_queue.put(("economy_check", 1, str(app_dir() / "codex_guard_last_run.txt"), message, manual))
 
         threading.Thread(target=worker, daemon=True).start()
 

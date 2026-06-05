@@ -7,6 +7,10 @@ __pycache__/
 
 classroom_central_bank_data.json
 codex_guard_last_run.txt
+codex_start_currency_last_run.txt
+codex_start_currency_chat.json
+.classroom_central_bank_startup_help_seen
+.classroom_central_bank_startup_chat_seen
 *.backup.json
 *.bak
 
