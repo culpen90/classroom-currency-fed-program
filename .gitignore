@@ -6,6 +6,7 @@ __pycache__/
 *$py.class
 
 classroom_central_bank_data.json
+codex_guard_last_run.txt
 *.backup.json
 *.bak
 

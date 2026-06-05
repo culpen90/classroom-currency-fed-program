@@ -17,7 +17,9 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -165,6 +167,7 @@ class CentralBankStore:
     def __init__(self, path: Optional[Path] = None) -> None:
         self.path = path or app_dir() / DATA_FILENAME
         self.data: Dict[str, Any] = self.default_data()
+        self.load_warning = ""
         self.load()
 
     @staticmethod
@@ -209,7 +212,7 @@ class CentralBankStore:
                     "id": "STUDENT_1",
                     "name": "Sample Student 1",
                     "type": "Student",
-                    "balance": 100.0,
+                    "balance": 0.0,
                     "notes": "Rename or delete this sample account.",
                     "created_at": now_stamp(),
                 },
@@ -217,7 +220,7 @@ class CentralBankStore:
                     "id": "STUDENT_2",
                     "name": "Sample Student 2",
                     "type": "Student",
-                    "balance": 100.0,
+                    "balance": 0.0,
                     "notes": "Rename or delete this sample account.",
                     "created_at": now_stamp(),
                 },
@@ -225,7 +228,7 @@ class CentralBankStore:
                     "id": "STORE",
                     "name": "Class Store",
                     "type": "Business",
-                    "balance": 250.0,
+                    "balance": 0.0,
                     "notes": "Example business account.",
                     "created_at": now_stamp(),
                 },
@@ -276,17 +279,32 @@ class CentralBankStore:
             self._ensure_core_accounts()
             self._coerce_numbers()
         except Exception as exc:
-            backup = self.path.with_suffix(".broken.json")
+            backup = self.path.with_name(
+                f"{self.path.stem}.broken-{datetime.now().strftime('%Y%m%d_%H%M%S')}{self.path.suffix}"
+            )
             try:
-                shutil.copy2(self.path, backup)
-            except Exception:
-                pass
-            self.data = self.default_data()
-            self.save()
-            raise ValidationError(
+                self.path.replace(backup)
+                backup_status = f"The unreadable file was moved to {backup}."
+                self.data = self.default_data()
+                self.save()
+            except Exception as move_exc:
+                try:
+                    shutil.copy2(self.path, backup)
+                    backup_status = f"A backup copy was saved to {backup}."
+                    self.data = self.default_data()
+                    self.save()
+                except Exception as backup_exc:
+                    self.data = self.default_data()
+                    self.load_warning = (
+                        f"The data file could not be read, and a backup could not be created. "
+                        f"The original file was left at {self.path}. "
+                        f"Original error: {exc}. Backup error: {backup_exc}. Move error: {move_exc}."
+                    )
+                    return
+            self.load_warning = (
                 f"The data file could not be read, so a new one was created. "
-                f"A backup may be at {backup}. Original error: {exc}"
-            ) from exc
+                f"{backup_status} Original error: {exc}"
+            )
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -928,6 +946,8 @@ class ClassroomCentralBankApp:
         self._build_audit_tab()
         self._build_help_tab()
         self.refresh_all()
+        if self.store.load_warning:
+            self.root.after(150, lambda: self.show_info(self.store.load_warning))
 
     def _setup_styles(self) -> None:
         style = ttk.Style()
@@ -1291,6 +1311,7 @@ class ClassroomCentralBankApp:
         ttk.Button(buttons, text="Export CSV Reports", command=self.export_csv_reports).grid(row=0, column=1, padx=5)
         ttk.Button(buttons, text="Create Backup", command=self.create_backup).grid(row=0, column=2, padx=5)
         ttk.Button(buttons, text="Reset Demo Data", command=self.reset_demo_data).grid(row=0, column=3, padx=5)
+        ttk.Button(buttons, text="Codex Review", command=self.run_codex_review).grid(row=0, column=4, padx=5)
 
         audit_frame = ttk.LabelFrame(container, text="Audit checks", padding=8)
         audit_frame.grid(row=1, column=0, sticky="nsew")
@@ -1971,6 +1992,51 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.status_var.set("Demo data reset.")
         except Exception as exc:
             self.show_error(f"Could not reset data: {exc}")
+
+    def run_codex_review(self) -> None:
+        guard = app_dir() / "codex_guard.py"
+        if not guard.exists():
+            self.show_error(f"Codex guard was not found at {guard}.")
+            return
+
+        self.status_var.set("Codex review started. This can take a few minutes.")
+
+        def worker() -> None:
+            try:
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(guard),
+                        "--once",
+                        "--codex-review",
+                    ],
+                    cwd=str(app_dir()),
+                    text=True,
+                    capture_output=True,
+                    timeout=1800,
+                )
+                output = ((completed.stdout or "") + (completed.stderr or "")).strip()
+                report = app_dir() / "codex_guard_last_run.txt"
+                report.write_text(output + "\n", encoding="utf-8")
+                self.root.after(0, lambda: self.finish_codex_review(completed.returncode, report, output))
+            except Exception as exc:
+                self.root.after(0, lambda: self.show_error(f"Could not run Codex review: {exc}"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_codex_review(self, returncode: int, report: Path, output: str) -> None:
+        if returncode == 0:
+            self.refresh_all()
+            self.show_info(f"Codex review finished.\n\nReport:\n{report}")
+            return
+
+        summary = output[-1200:] if output else "No output was captured."
+        self.show_error(
+            "Codex review did not finish successfully.\n\n"
+            "Run `codex login` and choose ChatGPT/OpenAI sign-in if authentication is needed. "
+            "This project does not need an API key.\n\n"
+            f"Report:\n{report}\n\nLast output:\n{summary}"
+        )
 
 
 def main() -> None:

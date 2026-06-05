@@ -210,7 +210,7 @@
           <h2>Account tools</h2>
           <label>Close account<select id="closeAccountSelect"></select></label>
           <button class="secondary" onclick="closeAccount()">Close selected account</button>
-          <p class="hint">Only accounts with a zero balance can be closed. That keeps the ledger clean and prevents financial goblins.</p>
+          <p class="hint">Only accounts with a zero balance can be closed. That keeps the ledger clean and prevents broken records.</p>
         </div>
       </div>
       <div class="card" style="margin-top:16px;">
@@ -946,6 +946,18 @@ function exportJSON() {
   download(`classroom_fed_backup_${today()}.json`, JSON.stringify(state, null, 2), "application/json;charset=utf-8");
 }
 
+function isBrowserBackup(parsed) {
+  if (!parsed || typeof parsed !== "object") return false;
+  if (!parsed.settings || typeof parsed.settings.currencyName !== "string") return false;
+  if (!parsed.nextIds || !["account", "transaction", "loan", "price", "policy"].every(key => Number.isFinite(Number(parsed.nextIds[key])))) return false;
+  if (!["accounts", "transactions", "loans", "prices", "policyHistory"].every(key => Array.isArray(parsed[key]))) return false;
+  return parsed.accounts.every(a =>
+    Number.isFinite(Number(a.id)) &&
+    typeof a.name === "string" &&
+    typeof a.type === "string"
+  );
+}
+
 function importJSONPrompt() {
   const input = document.createElement("input");
   input.type = "file";
@@ -957,7 +969,9 @@ function importJSONPrompt() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        if (!parsed.accounts || !parsed.transactions || !parsed.settings) throw new Error("That does not look like a Classroom Fed backup.");
+        if (!isBrowserBackup(parsed)) {
+          throw new Error("That does not look like a browser Classroom Fed backup. Desktop backups use a different format and should be opened in the Python app.");
+        }
         state = Object.assign(blankState(), parsed);
         render();
         toast("Backup imported.");

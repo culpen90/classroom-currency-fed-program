@@ -26,6 +26,28 @@ Mac/Linux shortcut:
 
 The Python version saves data in a local JSON file next to the app.
 
+## OpenAI Codex Guard
+
+The desktop launch scripts now start `codex_guard.py` while the app is running. The guard runs local checks and, when it sees a program mistake, calls the local Codex CLI with `gpt-5.5` and `model_reasoning_effort="xhigh"` so Codex can review or fix the issue.
+
+This uses the user's Codex login, not an OpenAI API key. Set it up once:
+
+```bash
+codex login
+```
+
+Choose ChatGPT/OpenAI sign-in in the browser. Do not add an API key to this project.
+
+Manual guard commands:
+
+```bash
+python3 codex_guard.py --once --local-only
+python3 codex_guard.py --once --codex-review
+python3 codex_guard.py --watch
+```
+
+On Windows, use `python` instead of `python3` if needed. The latest Codex output is saved to `codex_guard_last_run.txt`.
+
 ## What The Program Does
 
 - Creates accounts for students, businesses, banks, government, and other roles
@@ -35,6 +57,7 @@ The Python version saves data in a local JSON file next to the app.
 - Creates and tracks central bank loans
 - Tracks a classroom price index and calculates inflation
 - Runs audit checks for bad balances, reserve problems, overdue loans, and inflation warnings
+- Starts a Codex guard for desktop runs so coding mistakes can be caught with the user's Codex login
 - Exports CSV reports and JSON backups
 
 ## Suggested Project Roles
