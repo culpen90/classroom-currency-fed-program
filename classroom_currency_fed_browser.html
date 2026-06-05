@@ -333,6 +333,7 @@
             <button class="action" onclick="render()">Run audit</button>
             <button class="secondary" onclick="loadDemoData()">Load demo data</button>
             <button class="secondary" onclick="exportJSON()">Export JSON backup</button>
+            <button class="secondary" onclick="exportCodexPrompt()">Download Codex review prompt</button>
             <button class="secondary" onclick="exportCSV('accounts')">Export accounts CSV</button>
             <button class="secondary" onclick="exportCSV('transactions')">Export transactions CSV</button>
             <button class="secondary" onclick="exportCSV('loans')">Export loans CSV</button>
@@ -944,6 +945,41 @@ function exportCSV(name) {
 
 function exportJSON() {
   download(`classroom_fed_backup_${today()}.json`, JSON.stringify(state, null, 2), "application/json;charset=utf-8");
+}
+
+function codexEconomyPrompt() {
+  const summary = {
+    accountCount: activeAccounts().length,
+    transactionCount: state.transactions.length,
+    openLoanCount: state.loans.filter(l => l.status !== "Paid").length,
+    priceRecordCount: state.prices.length,
+    moneySupply: totalSupply(),
+    openLoanBalance: totalLoansDue(),
+    latestInflationPercent: inflationRate(),
+    settings: state.settings,
+    localAuditChecks: auditChecks().map(([level, check, details]) => ({ level, check, details }))
+  };
+  return `You are checking a live classroom currency economy after a teacher or student entered data in the GUI.
+This is NOT a source-code review. Check the math, account balances, transfers, money creation/removal, loan balances, reserve requirement, price-index entries, inflation logic, and any entries that look like typos or policy mistakes.
+
+Return a concise teacher-facing report with:
+1. Verdict: OK, Needs attention, or Critical.
+2. Math and ledger issues.
+3. Policy/economics issues.
+4. Specific GUI entries to recheck.
+5. Suggested next action.
+
+Computed summary:
+${JSON.stringify(summary, null, 2)}
+
+Browser classroom economy JSON:
+${JSON.stringify(state, null, 2)}
+`;
+}
+
+function exportCodexPrompt() {
+  download(`classroom_fed_codex_review_prompt_${today()}.txt`, codexEconomyPrompt(), "text/plain;charset=utf-8");
+  toast("Codex review prompt downloaded.");
 }
 
 function isBrowserBackup(parsed) {

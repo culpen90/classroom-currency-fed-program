@@ -934,6 +934,10 @@ class ClassroomCentralBankApp:
         self.policy_vars: Dict[str, tk.StringVar] = {}
         self.selected_account_id = tk.StringVar(value="")
         self.selected_loan_id = tk.StringVar(value="")
+        self.codex_status_var = tk.StringVar(value="Codex economy check: waiting for classroom data changes.")
+        self.codex_check_after_id: Optional[str] = None
+        self.codex_check_running = False
+        self.codex_check_pending_reason = ""
 
         self._setup_styles()
         self._build_shell()
@@ -1311,7 +1315,7 @@ class ClassroomCentralBankApp:
         ttk.Button(buttons, text="Export CSV Reports", command=self.export_csv_reports).grid(row=0, column=1, padx=5)
         ttk.Button(buttons, text="Create Backup", command=self.create_backup).grid(row=0, column=2, padx=5)
         ttk.Button(buttons, text="Reset Demo Data", command=self.reset_demo_data).grid(row=0, column=3, padx=5)
-        ttk.Button(buttons, text="Codex Review", command=self.run_codex_review).grid(row=0, column=4, padx=5)
+        ttk.Button(buttons, text="Run Codex Economy Check", command=self.run_codex_economy_check).grid(row=0, column=4, padx=5)
 
         audit_frame = ttk.LabelFrame(container, text="Audit checks", padding=8)
         audit_frame.grid(row=1, column=0, sticky="nsew")
@@ -1320,10 +1324,12 @@ class ClassroomCentralBankApp:
         self.audit_tree = self._tree(audit_frame, ["Status", "Check", "Message"], height=18)
         self.audit_tree.grid(row=0, column=0, sticky="nsew")
 
-        details = ttk.LabelFrame(container, text="Data file", padding=8)
+        details = ttk.LabelFrame(container, text="Data and Codex economy checks", padding=8)
         details.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        details.columnconfigure(0, weight=1)
         self.data_file_var = tk.StringVar()
         ttk.Label(details, textvariable=self.data_file_var, wraplength=1100, justify="left").grid(row=0, column=0, sticky="w")
+        ttk.Label(details, textvariable=self.codex_status_var, wraplength=1100, justify="left").grid(row=1, column=0, sticky="w", pady=(6, 0))
 
     def _build_help_tab(self) -> None:
         tab = self._make_tab("How to Use")
@@ -1732,6 +1738,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.clear_account_form()
             self.refresh_all()
             self.status_var.set(f"Added account {account_id}.")
+            self.schedule_codex_economy_check(f"account {account_id} was added")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1751,6 +1758,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             )
             self.refresh_all()
             self.status_var.set(f"Updated account {account_id}.")
+            self.schedule_codex_economy_check(f"account {account_id} was updated")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1768,6 +1776,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.clear_account_form()
             self.refresh_all()
             self.status_var.set(f"Deleted account {account_id}.")
+            self.schedule_codex_economy_check(f"account {account_id} was deleted")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1795,6 +1804,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.tx_memo_var.set("")
             self.refresh_all()
             self.status_var.set(f"Recorded transfer {tx_id}.")
+            self.schedule_codex_economy_check(f"transfer {tx_id} was recorded")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1813,6 +1823,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             )
             self.refresh_all()
             self.status_var.set("Policy settings saved.")
+            self.schedule_codex_economy_check("policy settings changed")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1827,6 +1838,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.cb_memo_var.set("")
             self.refresh_all()
             self.status_var.set("Currency injected.")
+            self.schedule_codex_economy_check("currency was injected")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1841,6 +1853,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.cb_memo_var.set("")
             self.refresh_all()
             self.status_var.set("Currency removed from circulation.")
+            self.schedule_codex_economy_check("currency was removed")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1855,6 +1868,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.cb_memo_var.set("")
             self.refresh_all()
             self.status_var.set("Open market buy recorded.")
+            self.schedule_codex_economy_check("open market buy was recorded")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1869,6 +1883,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.cb_memo_var.set("")
             self.refresh_all()
             self.status_var.set("Open market sell recorded.")
+            self.schedule_codex_economy_check("open market sell was recorded")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1882,6 +1897,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.cb_drop_amount_var.set("")
             self.refresh_all()
             self.status_var.set(f"Distributed currency to {count} {account_type} account(s).")
+            self.schedule_codex_economy_check(f"currency was distributed to {account_type} accounts")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1898,6 +1914,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.loan_purpose_var.set("")
             self.refresh_all()
             self.status_var.set(f"Created loan {loan_id}.")
+            self.schedule_codex_economy_check(f"loan {loan_id} was created")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1914,6 +1931,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.loan_payment_memo_var.set("")
             self.refresh_all()
             self.status_var.set(f"Recorded payment for {loan_id}.")
+            self.schedule_codex_economy_check(f"loan payment was recorded for {loan_id}")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1929,6 +1947,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.store.forgive_loan(loan_id)
             self.refresh_all()
             self.status_var.set(f"Forgave loan {loan_id}.")
+            self.schedule_codex_economy_check(f"loan {loan_id} was forgiven")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1947,6 +1966,7 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.pi_notes_var.set("")
             self.refresh_all()
             self.status_var.set(f"Added price index record {record_id}.")
+            self.schedule_codex_economy_check(f"price index record {record_id} was added")
         except ValidationError as exc:
             self.show_error(str(exc))
         except Exception as exc:
@@ -1990,16 +2010,40 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
             self.store.create_demo_reset()
             self.refresh_all()
             self.status_var.set("Demo data reset.")
+            self.schedule_codex_economy_check("demo data was reset")
         except Exception as exc:
             self.show_error(f"Could not reset data: {exc}")
 
-    def run_codex_review(self) -> None:
+    def schedule_codex_economy_check(self, reason: str) -> None:
+        self.codex_check_pending_reason = reason
+        self.codex_status_var.set(f"Codex economy check queued: {reason}.")
+        if self.codex_check_after_id is not None:
+            try:
+                self.root.after_cancel(self.codex_check_after_id)
+            except Exception:
+                pass
+        self.codex_check_after_id = self.root.after(1800, lambda: self.run_codex_economy_check(manual=False))
+
+    def run_codex_economy_check(self, manual: bool = True) -> None:
         guard = app_dir() / "codex_guard.py"
         if not guard.exists():
             self.show_error(f"Codex guard was not found at {guard}.")
             return
 
-        self.status_var.set("Codex review started. This can take a few minutes.")
+        if self.codex_check_running:
+            self.codex_check_pending_reason = self.codex_check_pending_reason or "new classroom data"
+            self.codex_status_var.set("Codex economy check is already running; another check will run afterward.")
+            if manual:
+                self.show_info("Codex economy check is already running. Another check will run afterward if data changed.")
+            return
+
+        reason = self.codex_check_pending_reason or ("manual review" if manual else "classroom data changed")
+        self.codex_check_pending_reason = ""
+        self.codex_check_after_id = None
+        self.codex_check_running = True
+        self.store.save()
+        self.codex_status_var.set(f"Codex economy check running for {reason}.")
+        self.status_var.set("Codex economy check started. This can take a few minutes.")
 
         def worker() -> None:
             try:
@@ -2008,7 +2052,9 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
                         sys.executable,
                         str(guard),
                         "--once",
-                        "--codex-review",
+                        "--economy-review",
+                        "--data-file",
+                        str(self.store.path),
                     ],
                     cwd=str(app_dir()),
                     text=True,
@@ -2018,25 +2064,38 @@ You can export CSV reports from the Audit + Reports tab. Those files can be open
                 output = ((completed.stdout or "") + (completed.stderr or "")).strip()
                 report = app_dir() / "codex_guard_last_run.txt"
                 report.write_text(output + "\n", encoding="utf-8")
-                self.root.after(0, lambda: self.finish_codex_review(completed.returncode, report, output))
+                self.root.after(0, lambda: self.finish_codex_economy_check(completed.returncode, report, output, manual))
             except Exception as exc:
-                self.root.after(0, lambda: self.show_error(f"Could not run Codex review: {exc}"))
+                message = str(exc)
+                self.root.after(0, lambda: self.finish_codex_economy_check(1, app_dir() / "codex_guard_last_run.txt", message, manual))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def finish_codex_review(self, returncode: int, report: Path, output: str) -> None:
+    def finish_codex_economy_check(self, returncode: int, report: Path, output: str, manual: bool) -> None:
+        self.codex_check_running = False
         if returncode == 0:
             self.refresh_all()
-            self.show_info(f"Codex review finished.\n\nReport:\n{report}")
+            self.codex_status_var.set(f"Codex economy check finished at {now_stamp()}. Report: {report}")
+            self.status_var.set("Codex economy check finished.")
+            if manual:
+                self.show_info(f"Codex economy check finished.\n\nReport:\n{report}")
+            if self.codex_check_pending_reason:
+                self.schedule_codex_economy_check(self.codex_check_pending_reason)
             return
 
         summary = output[-1200:] if output else "No output was captured."
-        self.show_error(
-            "Codex review did not finish successfully.\n\n"
+        message = (
+            "Codex economy check did not finish successfully. "
             "Run `codex login` and choose ChatGPT/OpenAI sign-in if authentication is needed. "
-            "This project does not need an API key.\n\n"
-            f"Report:\n{report}\n\nLast output:\n{summary}"
+            "This project does not need an API key. "
+            f"Report: {report}"
         )
+        self.codex_status_var.set(message)
+        self.status_var.set("Codex economy check did not finish.")
+        if manual:
+            self.show_error(f"{message}\n\nLast output:\n{summary}")
+        if self.codex_check_pending_reason:
+            self.schedule_codex_economy_check(self.codex_check_pending_reason)
 
 
 def main() -> None:

@@ -6,7 +6,7 @@ This repository contains a small classroom central-bank app:
 
 - `classroom_currency_fed_desktop.py`: Python/tkinter desktop app.
 - `classroom_currency_fed_browser.html`: single-file browser app.
-- `codex_guard.py`: local guard that runs checks and calls the Codex CLI.
+- `codex_guard.py`: local guard that reviews classroom economy JSON data with the Codex CLI.
 
 ## Constraints
 
@@ -14,6 +14,7 @@ This repository contains a small classroom central-bank app:
 - Keep the browser app as a standalone offline HTML file.
 - Do not add OpenAI API-key handling, OpenAI SDK calls, or stored secrets to this app.
 - Codex integration must use the local Codex CLI and the user's own `codex login` session.
+- Codex checks are for classroom economy data and math entered through the GUI, not source-code review.
 - Do not edit `classroom_central_bank_data.json`, backups, exports, or generated reports unless the user explicitly asks.
 
 ## Checks

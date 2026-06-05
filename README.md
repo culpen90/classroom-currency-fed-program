@@ -26,9 +26,9 @@ Mac/Linux shortcut:
 
 The Python version saves data in a local JSON file next to the app.
 
-## OpenAI Codex Guard
+## OpenAI Codex Economy Check
 
-The desktop launch scripts now start `codex_guard.py` while the app is running. The guard runs local checks and, when it sees a program mistake, calls the local Codex CLI with `gpt-5.5` and `model_reasoning_effort="xhigh"` so Codex can review or fix the issue.
+The desktop app can ask the local Codex CLI to check the classroom economy data that people enter into the GUI. After successful account, transfer, policy, loan, money-supply, or price-index changes, the app queues a Codex economy check. Codex reviews the current JSON data with `gpt-5.5` and `model_reasoning_effort="xhigh"` to look for math mistakes, broken ledger logic, reserve shortfalls, strange loan balances, inflation issues, or entries that look like typos.
 
 This uses the user's Codex login, not an OpenAI API key. Set it up once:
 
@@ -38,15 +38,17 @@ codex login
 
 Choose ChatGPT/OpenAI sign-in in the browser. Do not add an API key to this project.
 
-Manual guard commands:
+In the desktop app, use **Audit + Reports -> Run Codex Economy Check** to run a manual check. The latest result is saved to `codex_guard_last_run.txt`.
+
+Manual terminal commands:
 
 ```bash
 python3 codex_guard.py --once --local-only
-python3 codex_guard.py --once --codex-review
+python3 codex_guard.py --once --economy-review
 python3 codex_guard.py --watch
 ```
 
-On Windows, use `python` instead of `python3` if needed. The latest Codex output is saved to `codex_guard_last_run.txt`.
+On Windows, use `python` instead of `python3` if needed. The browser app cannot launch the local Codex CLI by itself, so its Audit tab can download a Codex review prompt containing the current browser data.
 
 ## What The Program Does
 
@@ -57,7 +59,7 @@ On Windows, use `python` instead of `python3` if needed. The latest Codex output
 - Creates and tracks central bank loans
 - Tracks a classroom price index and calculates inflation
 - Runs audit checks for bad balances, reserve problems, overdue loans, and inflation warnings
-- Starts a Codex guard for desktop runs so coding mistakes can be caught with the user's Codex login
+- Runs Codex economy checks on desktop data entries using the user's Codex login
 - Exports CSV reports and JSON backups
 
 ## Suggested Project Roles

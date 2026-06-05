@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Local Codex guard for the Classroom Currency Fed program.
+"""Codex economy checker for the Classroom Currency Fed program.
 
-The guard keeps OpenAI credentials out of this project. It calls the Codex CLI,
-which reuses the user's own Codex/ChatGPT login.
+This script does not collect OpenAI API keys. It calls the local Codex CLI,
+which reuses the user's own `codex login` ChatGPT/OpenAI session.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ import argparse
 import glob
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -20,36 +19,19 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
 ROOT = Path(__file__).resolve().parent
-DESKTOP_APP = ROOT / "classroom_currency_fed_desktop.py"
-BROWSER_APP = ROOT / "classroom_currency_fed_browser.html"
 DATA_FILE = ROOT / "classroom_central_bank_data.json"
 LAST_REPORT = ROOT / "codex_guard_last_run.txt"
-WATCHED_FILES = [
-    DESKTOP_APP,
-    BROWSER_APP,
-    ROOT / "README.md",
-    ROOT / "README.txt",
-    ROOT / "run_mac_linux.sh",
-    ROOT / "run_windows.bat",
-]
 
 
 @dataclass
 class CheckResult:
-    name: str
-    ok: bool
-    output: str
-    skipped: bool = False
-
-    @property
-    def status(self) -> str:
-        if self.skipped:
-            return "SKIP"
-        return "OK" if self.ok else "FAIL"
+    level: str
+    check: str
+    details: str
 
 
 def timestamp() -> str:
@@ -77,7 +59,6 @@ def run_command(command: Sequence[str], timeout: int = 120, input_text: Optional
 
 
 def shell_lookup(command: str) -> Optional[str]:
-    """Find commands from the user's interactive shell when this PATH is sparse."""
     if os.name == "nt":
         return None
     shell = os.environ.get("SHELL") or "bash"
@@ -108,9 +89,7 @@ def find_command(command: str) -> Optional[str]:
         str(home / ".npm-global" / "bin" / command),
     ]
     if os.name != "nt":
-        candidates.extend(
-            glob.glob(str(home / ".config" / "nvm" / "versions" / "node" / "*" / "bin" / command))
-        )
+        candidates.extend(glob.glob(str(home / ".config" / "nvm" / "versions" / "node" / "*" / "bin" / command)))
         candidates.extend(glob.glob(str(home / ".nvm" / "versions" / "node" / "*" / "bin" / command)))
     else:
         candidates.extend(
@@ -127,104 +106,335 @@ def find_command(command: str) -> Optional[str]:
     return str(newest)
 
 
-def check_python_syntax() -> CheckResult:
-    code, output = run_command([sys.executable, "-m", "py_compile", str(DESKTOP_APP)])
-    return CheckResult("Python syntax", code == 0, output or "Desktop app compiles.")
-
-
-def extract_browser_script() -> str:
-    html = BROWSER_APP.read_text(encoding="utf-8")
-    blocks = re.findall(r"<script\b[^>]*>(.*?)</script>", html, flags=re.IGNORECASE | re.DOTALL)
-    return "\n\n".join(blocks)
-
-
-def check_browser_javascript() -> CheckResult:
-    node = find_command("node")
-    if not node:
-        return CheckResult(
-            "Browser JavaScript syntax",
-            True,
-            "Node.js was not found, so browser JavaScript syntax was not checked.",
-            skipped=True,
-        )
-
-    script = extract_browser_script()
-    checker = "const fs = require('fs'); new Function(fs.readFileSync(0, 'utf8'));"
-    code, output = run_command([node, "-e", checker], input_text=script)
-    return CheckResult("Browser JavaScript syntax", code == 0, output or "Browser script parses.")
-
-
-def check_data_file() -> CheckResult:
-    if not DATA_FILE.exists():
-        return CheckResult("Local data file", True, "No local data file exists yet.", skipped=True)
+def as_float(value: Any) -> float:
     try:
-        with DATA_FILE.open("r", encoding="utf-8") as handle:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def load_data(path: Path) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    if not path.exists():
+        return None, f"No classroom data file exists yet at {path}."
+    try:
+        with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
     except Exception as exc:
-        return CheckResult("Local data file", False, f"Data file is not valid JSON: {exc}")
-
-    required = ["settings", "accounts", "transactions", "loans", "price_index"]
-    missing = [key for key in required if key not in data]
-    if missing:
-        return CheckResult("Local data file", False, f"Data file is missing keys: {', '.join(missing)}")
-    if not isinstance(data.get("accounts"), list):
-        return CheckResult("Local data file", False, "Data file accounts value must be a list.")
-    return CheckResult("Local data file", True, "Local data file shape looks valid.")
+        return None, f"Could not read classroom data: {exc}"
+    if not isinstance(data, dict):
+        return None, "Classroom data must be a JSON object."
+    return data, None
 
 
-def run_local_checks() -> List[CheckResult]:
-    return [
-        check_python_syntax(),
-        check_browser_javascript(),
-        check_data_file(),
-    ]
+def data_format(data: Dict[str, Any]) -> str:
+    if "price_index" in data:
+        return "desktop"
+    if "prices" in data:
+        return "browser"
+    return "unknown"
 
 
-def format_results(results: Iterable[CheckResult]) -> str:
-    lines: List[str] = []
-    for result in results:
-        lines.append(f"[{result.status}] {result.name}")
-        if result.output:
-            lines.append(textwrap.indent(result.output, "  "))
-    return "\n".join(lines)
+def accounts(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = data.get("accounts", [])
+    return rows if isinstance(rows, list) else []
 
 
-def codex_prompt(results: List[CheckResult], allow_edits: bool, codex_review: bool) -> str:
-    local_output = format_results(results)
-    mode = "fix the mistake with the smallest safe code change" if allow_edits else "review and report only"
-    review_line = (
-        "Also inspect the app for likely user-facing mistakes even if the local checks pass."
-        if codex_review
-        else "Focus on the local check failure first."
+def transactions(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = data.get("transactions", [])
+    return rows if isinstance(rows, list) else []
+
+
+def loans(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = data.get("loans", [])
+    return rows if isinstance(rows, list) else []
+
+
+def price_rows(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = data.get("price_index", data.get("prices", []))
+    return rows if isinstance(rows, list) else []
+
+
+def settings(data: Dict[str, Any]) -> Dict[str, Any]:
+    row = data.get("settings", {})
+    return row if isinstance(row, dict) else {}
+
+
+def account_id(account: Dict[str, Any]) -> str:
+    return str(account.get("id", "")).strip()
+
+
+def account_name(account: Dict[str, Any]) -> str:
+    return str(account.get("name", account_id(account))).strip() or account_id(account)
+
+
+def account_type(account: Dict[str, Any]) -> str:
+    return str(account.get("type", "")).strip()
+
+
+def account_balance(account: Dict[str, Any]) -> float:
+    return round(as_float(account.get("balance", 0.0)), 2)
+
+
+def active_accounts(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [account for account in accounts(data) if account.get("active", True) is not False]
+
+
+def money_supply(data: Dict[str, Any]) -> float:
+    total = 0.0
+    for account in active_accounts(data):
+        if account_type(account).lower() == "central bank":
+            continue
+        total += account_balance(account)
+    return round(total, 2)
+
+
+def bank_reserves(data: Dict[str, Any]) -> float:
+    total = 0.0
+    for account in active_accounts(data):
+        kind = account_type(account).lower()
+        if kind in {"bank", "commercial bank"}:
+            total += account_balance(account)
+    return round(total, 2)
+
+
+def setting_number(data: Dict[str, Any], *keys: str) -> float:
+    row = settings(data)
+    for key in keys:
+        if key in row:
+            return as_float(row.get(key))
+    return 0.0
+
+
+def tx_id(tx: Dict[str, Any]) -> str:
+    return str(tx.get("id", "?"))
+
+
+def tx_amount(tx: Dict[str, Any]) -> float:
+    return round(as_float(tx.get("amount", 0.0)), 2)
+
+
+def tx_from(tx: Dict[str, Any]) -> str:
+    return str(tx.get("from_id", tx.get("fromId", ""))).strip()
+
+
+def tx_to(tx: Dict[str, Any]) -> str:
+    return str(tx.get("to_id", tx.get("toId", ""))).strip()
+
+
+def tx_type(tx: Dict[str, Any]) -> str:
+    return str(tx.get("type", tx.get("action", ""))).strip()
+
+
+def open_loan(loan: Dict[str, Any]) -> bool:
+    status = str(loan.get("status", "")).lower()
+    return status not in {"closed", "paid"}
+
+
+def loan_balance(loan: Dict[str, Any]) -> float:
+    return round(as_float(loan.get("outstanding", loan.get("balanceDue", 0.0))), 2)
+
+
+def price_total(row: Dict[str, Any]) -> float:
+    return round(as_float(row.get("basket_total", row.get("price", 0.0))), 2)
+
+
+def price_date(row: Dict[str, Any]) -> str:
+    return str(row.get("date", "")).strip()
+
+
+def latest_inflation(data: Dict[str, Any]) -> Optional[float]:
+    rows = [row for row in price_rows(data) if price_total(row) > 0 and price_date(row)]
+    fmt = data_format(data)
+    if fmt == "browser":
+        grouped: Dict[str, List[float]] = {}
+        for row in rows:
+            grouped.setdefault(price_date(row), []).append(price_total(row))
+        dated = sorted((date, sum(values) / len(values)) for date, values in grouped.items() if values)
+    else:
+        dated = sorted((price_date(row), price_total(row)) for row in rows)
+    if len(dated) < 2:
+        return None
+    previous = dated[-2][1]
+    latest = dated[-1][1]
+    if previous <= 0:
+        return None
+    return round(((latest - previous) / previous) * 100, 4)
+
+
+def local_economy_checks(data: Dict[str, Any]) -> List[CheckResult]:
+    checks: List[CheckResult] = []
+    acct_rows = active_accounts(data)
+    ids = [account_id(account) for account in acct_rows]
+    duplicate_ids = sorted({item for item in ids if item and ids.count(item) > 1})
+    checks.append(
+        CheckResult(
+            "Critical" if duplicate_ids else "OK",
+            "Account IDs",
+            f"Duplicate account IDs: {', '.join(duplicate_ids)}" if duplicate_ids else "All active account IDs are unique.",
+        )
     )
+
+    negatives = [
+        f"{account_name(account)} ({account_id(account)}) has {account_balance(account):,.2f}"
+        for account in acct_rows
+        if account_type(account).lower() != "central bank" and account_balance(account) < -0.009
+    ]
+    checks.append(
+        CheckResult(
+            "Critical" if negatives else "OK",
+            "Negative balances",
+            "; ".join(negatives[:8]) if negatives else "No active non-central-bank account has a negative balance.",
+        )
+    )
+
+    known_ids = set(ids)
+    broken_refs: List[str] = []
+    for tx in transactions(data):
+        from_id = tx_from(tx)
+        to_id = tx_to(tx)
+        if from_id and from_id not in known_ids and from_id != "FED":
+            broken_refs.append(f"{tx_id(tx)} from {from_id}")
+        if to_id and to_id not in known_ids and to_id != "FED":
+            broken_refs.append(f"{tx_id(tx)} to {to_id}")
+    checks.append(
+        CheckResult(
+            "Warning" if broken_refs else "OK",
+            "Transaction references",
+            "; ".join(broken_refs[:10]) if broken_refs else "All transaction account references point to known active accounts.",
+        )
+    )
+
+    bad_amounts = [tx_id(tx) for tx in transactions(data) if tx_amount(tx) <= 0]
+    checks.append(
+        CheckResult(
+            "Warning" if bad_amounts else "OK",
+            "Transaction amounts",
+            f"Transactions with non-positive amounts: {', '.join(bad_amounts[:10])}" if bad_amounts else "All transaction amounts are positive.",
+        )
+    )
+
+    supply = money_supply(data)
+    checks.append(
+        CheckResult(
+            "Critical" if supply <= 0 else "OK",
+            "Money supply",
+            f"Current active money supply is {supply:,.2f}.",
+        )
+    )
+
+    reserve_requirement = setting_number(data, "reserve_requirement", "reserveRequirement")
+    reserves = bank_reserves(data)
+    required_reserves = round(supply * reserve_requirement / 100, 2)
+    checks.append(
+        CheckResult(
+            "Warning" if supply > 0 and reserves + 0.009 < required_reserves else "OK",
+            "Reserve requirement",
+            f"Bank reserves are {reserves:,.2f}; required reserves are {required_reserves:,.2f} at {reserve_requirement:.2f}%.",
+        )
+    )
+
+    open_balances = [loan_balance(loan) for loan in loans(data) if open_loan(loan)]
+    negative_loans = [str(loan.get("id", "?")) for loan in loans(data) if loan_balance(loan) < -0.009]
+    if negative_loans:
+        checks.append(CheckResult("Warning", "Loan balances", f"Loans with negative balances: {', '.join(negative_loans[:8])}."))
+    else:
+        checks.append(CheckResult("OK", "Loan balances", f"Open loan balance total is {sum(open_balances):,.2f}."))
+
+    inflation = latest_inflation(data)
+    target = setting_number(data, "inflation_target", "targetInflation")
+    if inflation is None:
+        checks.append(CheckResult("Info", "Inflation", "Not enough price data to calculate inflation."))
+    elif inflation > target + 3:
+        checks.append(CheckResult("Warning", "Inflation", f"Latest inflation is {inflation:.2f}%, above the {target:.2f}% target."))
+    elif inflation < target - 3:
+        checks.append(CheckResult("Info", "Inflation", f"Latest inflation is {inflation:.2f}%, below the {target:.2f}% target."))
+    else:
+        checks.append(CheckResult("OK", "Inflation", f"Latest inflation is {inflation:.2f}% against a {target:.2f}% target."))
+
+    return checks
+
+
+def format_checks(checks: Iterable[CheckResult]) -> str:
+    return "\n".join(f"[{check.level}] {check.check}: {check.details}" for check in checks)
+
+
+def economy_summary(data: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "data_format": data_format(data),
+        "account_count": len(active_accounts(data)),
+        "transaction_count": len(transactions(data)),
+        "open_loan_count": sum(1 for loan in loans(data) if open_loan(loan)),
+        "price_record_count": len(price_rows(data)),
+        "money_supply": money_supply(data),
+        "bank_reserves": bank_reserves(data),
+        "reserve_requirement_percent": setting_number(data, "reserve_requirement", "reserveRequirement"),
+        "latest_inflation_percent": latest_inflation(data),
+        "settings": settings(data),
+    }
+
+
+def codex_prompt(data_path: Path, data: Dict[str, Any], checks: List[CheckResult]) -> str:
+    data_json = json.dumps(data, indent=2, sort_keys=True)
+    if len(data_json) > 140_000:
+        data_json = data_json[:140_000] + "\n... TRUNCATED: focus on visible data plus local checks ..."
     return textwrap.dedent(
         f"""
-        You are the OpenAI Codex guard for the Classroom Currency Fed repository.
+        You are checking a live classroom currency economy after a teacher or student entered data in the GUI.
+        This is NOT a source-code review. Do not suggest code changes unless the data proves the app calculated something incorrectly.
 
-        Goal: {mode}. {review_line}
+        Use the classroom data below to verify:
+        - account balances and money supply make sense
+        - transfers, money creation/removal, loan creation/payment, and policy history are internally consistent
+        - reserve requirement math is right
+        - loan balances and statuses are plausible
+        - price-index entries and inflation logic make sense
+        - entries that look like typos, duplicates, impossible values, missing references, or policy mistakes
 
-        Local check output:
-        {local_output}
+        Return a concise teacher-facing report with:
+        1. Verdict: OK, Needs attention, or Critical.
+        2. Math and ledger issues.
+        3. Policy/economics issues.
+        4. Specific GUI entries to recheck.
+        5. Suggested next action.
 
-        Required context:
-        - Desktop app: classroom_currency_fed_desktop.py
-        - Browser app: classroom_currency_fed_browser.html
-        - Guard script: codex_guard.py
-        - This project must not collect OpenAI API keys or add OpenAI SDK/API-key auth.
-        - Use the existing Codex CLI authentication model: users run `codex login` and sign in with ChatGPT/OpenAI.
-        - Preserve classroom data. Do not edit classroom_central_bank_data.json, backups, exports, or generated reports unless a user explicitly asks.
-        - Keep dependencies minimal. The app currently uses the Python standard library and browser-native JavaScript.
+        Rules:
+        - Do not edit files.
+        - Do not ask for or mention OpenAI API keys.
+        - If the data is incomplete, say what data is needed.
+        - Use the local deterministic checks as evidence, but do your own reasoning too.
 
-        Verification to run before finishing:
-        - `{sys.executable} -m py_compile classroom_currency_fed_desktop.py`
-        - `{sys.executable} codex_guard.py --once --local-only`
+        Data file: {data_path}
 
-        Finish with a concise summary of what you changed or, in report-only mode, the issues you found.
+        Computed summary:
+        {json.dumps(economy_summary(data), indent=2, sort_keys=True)}
+
+        Local deterministic checks:
+        {format_checks(checks)}
+
+        Classroom economy JSON:
+        ```json
+        {data_json}
+        ```
         """
     ).strip()
 
 
-def run_codex(results: List[CheckResult], allow_edits: bool, codex_review: bool) -> int:
+def review_economy(args: argparse.Namespace) -> int:
+    data_path = Path(args.data_file).expanduser().resolve()
+    data, error = load_data(data_path)
+    if error or data is None:
+        message = f"[Info] Economy data: {error}"
+        print(message)
+        LAST_REPORT.write_text(message + "\n", encoding="utf-8")
+        return 0 if args.local_only else 1
+
+    checks = local_economy_checks(data)
+    local_report = f"[{timestamp()}] Local economy checks\n{format_checks(checks)}"
+    print(local_report)
+    if args.local_only:
+        LAST_REPORT.write_text(local_report + "\n", encoding="utf-8")
+        return 0
+
     codex = find_command("codex")
     if not codex:
         message = textwrap.dedent(
@@ -237,12 +447,11 @@ def run_codex(results: List[CheckResult], allow_edits: bool, codex_review: bool)
             Choose ChatGPT/OpenAI sign-in. This project does not need an OpenAI API key.
             """
         ).strip()
-        LAST_REPORT.write_text(message + "\n", encoding="utf-8")
+        LAST_REPORT.write_text(local_report + "\n\n" + message + "\n", encoding="utf-8")
         print(message)
         return 127
 
-    prompt = codex_prompt(results, allow_edits=allow_edits, codex_review=codex_review)
-    sandbox = "workspace-write" if allow_edits else "read-only"
+    prompt = codex_prompt(data_path, data, checks)
     command = [
         codex,
         "exec",
@@ -255,13 +464,13 @@ def run_codex(results: List[CheckResult], allow_edits: bool, codex_review: bool)
         "-c",
         'approval_policy="never"',
         "-s",
-        sandbox,
+        "read-only",
         prompt,
     ]
-
-    print(f"[{timestamp()}] Running Codex guard with gpt-5.5 / xhigh / {sandbox}.")
+    print(f"[{timestamp()}] Running Codex economy check with gpt-5.5 / xhigh / read-only.")
     code, output = run_command(command, timeout=1800)
-    LAST_REPORT.write_text(output + "\n", encoding="utf-8")
+    report = local_report + "\n\n" + (output or "")
+    LAST_REPORT.write_text(report + "\n", encoding="utf-8")
     if output:
         print(output)
     if code != 0:
@@ -272,77 +481,50 @@ def run_codex(results: List[CheckResult], allow_edits: bool, codex_review: bool)
     return code
 
 
-def watched_snapshot() -> Tuple[Tuple[str, int, int], ...]:
-    rows: List[Tuple[str, int, int]] = []
-    for path in WATCHED_FILES:
-        if path.exists():
-            stat = path.stat()
-            rows.append((str(path), stat.st_mtime_ns, stat.st_size))
-    return tuple(rows)
-
-
-def check_and_maybe_call_codex(args: argparse.Namespace) -> int:
-    results = run_local_checks()
-    failures = [result for result in results if not result.ok and not result.skipped]
-    print(f"[{timestamp()}] Local guard checks")
-    print(format_results(results))
-
-    if args.local_only:
-        return 1 if failures else 0
-
-    should_run_codex = bool(failures) or args.codex_review
-    if not should_run_codex:
-        return 0
-
-    allow_edits = (bool(failures) and not args.no_fix) or args.auto_fix
-    codex_code = run_codex(results, allow_edits=allow_edits, codex_review=args.codex_review)
-    if codex_code != 0:
-        return codex_code
-
-    if allow_edits:
-        print(f"[{timestamp()}] Rechecking after Codex.")
-        after = run_local_checks()
-        print(format_results(after))
-        return 1 if any(not result.ok and not result.skipped for result in after) else 0
-    return 0 if not failures else 1
+def data_snapshot(path: Path) -> Optional[Tuple[int, int]]:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
 
 
 def watch(args: argparse.Namespace) -> int:
-    print(f"[{timestamp()}] Codex guard is watching this project. Press Ctrl+C to stop.")
-    previous: Optional[Tuple[Tuple[str, int, int], ...]] = None
+    data_path = Path(args.data_file).expanduser().resolve()
+    print(f"[{timestamp()}] Codex economy guard is watching {data_path}. Press Ctrl+C to stop.")
+    previous: Optional[Tuple[int, int]] = None
     exit_code = 0
     try:
         while True:
-            current = watched_snapshot()
-            if current != previous:
+            current = data_snapshot(data_path)
+            if current is not None and current != previous:
                 previous = current
-                exit_code = check_and_maybe_call_codex(args)
+                time.sleep(max(args.debounce, 0.1))
+                exit_code = review_economy(args)
             time.sleep(max(args.interval, 1.0))
     except KeyboardInterrupt:
-        print(f"\n[{timestamp()}] Codex guard stopped.")
+        print(f"\n[{timestamp()}] Codex economy guard stopped.")
     return exit_code
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run local checks and call OpenAI Codex when mistakes appear.")
-    parser.add_argument("--once", action="store_true", help="Run one guard pass. This is the default unless --watch is used.")
-    parser.add_argument("--watch", action="store_true", help="Keep watching project files and rerun the guard when they change.")
-    parser.add_argument("--interval", type=float, default=5.0, help="Seconds between watch checks.")
-    parser.add_argument("--local-only", action="store_true", help="Run local checks without invoking Codex.")
-    parser.add_argument("--codex-review", action="store_true", help="Ask Codex to inspect the app even when local checks pass.")
-    parser.add_argument("--auto-fix", action="store_true", help="Allow Codex to edit during optional review runs.")
-    parser.add_argument("--no-fix", action="store_true", help="Never allow Codex to edit; report only.")
+    parser = argparse.ArgumentParser(description="Ask Codex to check classroom economy data for math and policy mistakes.")
+    parser.add_argument("--once", action="store_true", help="Run one economy check. This is the default unless --watch is used.")
+    parser.add_argument("--watch", action="store_true", help="Watch the classroom data file and check it when it changes.")
+    parser.add_argument("--interval", type=float, default=5.0, help="Seconds between data-file watch checks.")
+    parser.add_argument("--debounce", type=float, default=1.0, help="Seconds to wait after a data-file change before checking.")
+    parser.add_argument("--data-file", default=str(DATA_FILE), help="Classroom economy JSON file to review.")
+    parser.add_argument("--local-only", action="store_true", help="Run deterministic local economy checks without invoking Codex.")
+    parser.add_argument("--economy-review", action="store_true", help="Explicitly run a Codex economy review.")
+    parser.add_argument("--codex-review", action="store_true", help="Compatibility alias for --economy-review.")
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    if args.no_fix and args.auto_fix:
-        print("--no-fix and --auto-fix cannot be used together.")
-        return 2
     if args.watch:
         return watch(args)
-    return check_and_maybe_call_codex(args)
+    return review_economy(args)
 
 
 if __name__ == "__main__":
