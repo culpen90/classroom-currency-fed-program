@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Classroom Currency Fed</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --ink: #182230;
+      --muted: #586678;
+      --line: #d9e1ec;
+      --accent: #234e70;
+      --good: #137333;
+      --warn: #9a5800;
+      --bad: #b3261e;
+      --soft: #eef4fb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      padding: 22px 24px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff, #f7fafe);
+    }
+    h1 { margin: 0; font-size: 28px; letter-spacing: -0.02em; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    h3 { margin: 0 0 8px; font-size: 15px; color: var(--muted); }
+    .subhead { color: var(--muted); margin-top: 4px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--soft);
+      color: var(--accent);
+      border: 1px solid #c8d9ec;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 12px 24px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    nav button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 9px 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    nav button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    main { padding: 20px 24px 40px; max-width: 1280px; margin: 0 auto; }
+    .tab { display: none; }
+    .tab.active { display: block; }
+    .grid { display: grid; gap: 16px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 1px 1px rgba(16, 24, 40, 0.03);
+    }
+    .metric .label { color: var(--muted); font-weight: 700; font-size: 13px; }
+    .metric .value { font-size: 24px; font-weight: 850; margin-top: 6px; letter-spacing: -0.02em; }
+    .policy-signal {
+      line-height: 1.5;
+      color: #243447;
+      white-space: pre-line;
+      background: #f9fbfe;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      min-height: 160px;
+    }
+    label { display: block; font-weight: 700; color: var(--muted); font-size: 13px; margin-top: 10px; }
+    input, select, textarea {
+      width: 100%;
+      margin-top: 4px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 11px;
+      font: inherit;
+      background: #fff;
+      color: var(--ink);
+    }
+    textarea { min-height: 70px; resize: vertical; }
+    button.action {
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 11px;
+      padding: 10px 13px;
+      font-weight: 800;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+    button.secondary {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 11px;
+      padding: 10px 13px;
+      font-weight: 800;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+    .button-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+    tr:hover td { background: #fbfdff; }
+    .scroll { overflow-x: auto; }
+    .hint { color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 10px; }
+    .ok { color: var(--good); font-weight: 800; }
+    .warning { color: var(--warn); font-weight: 800; }
+    .critical { color: var(--bad); font-weight: 800; }
+    .info { color: var(--accent); font-weight: 800; }
+    .toast {
+      position: fixed;
+      right: 22px;
+      bottom: 22px;
+      background: #182230;
+      color: #fff;
+      padding: 12px 14px;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+      display: none;
+      z-index: 20;
+      max-width: 360px;
+    }
+    .danger { color: var(--bad); }
+    @media (max-width: 1050px) {
+      .grid.metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .grid.three { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 820px) {
+      header { align-items: start; flex-direction: column; }
+      .grid.two, .grid.metrics { grid-template-columns: 1fr; }
+      main { padding: 16px; }
+      nav { padding: 10px 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Classroom Currency Fed</h1>
+      <div class="subhead">A central-bank control panel for your own school currency.</div>
+    </div>
+    <div class="pill" id="currencyPill">Currency: ClassBucks</div>
+  </header>
+
+  <nav id="tabs"></nav>
+
+  <main>
+    <section class="tab active" id="dashboard">
+      <div class="grid metrics" id="metrics"></div>
+      <div class="grid two" style="margin-top:16px;">
+        <div class="card">
+          <h2>Policy signal</h2>
+          <div class="policy-signal" id="policySignal"></div>
+        </div>
+        <div class="card">
+          <h2>Recent central bank activity</h2>
+          <div class="scroll"><table id="recentTable"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab" id="accounts">
+      <div class="grid two">
+        <div class="card">
+          <h2>Create account</h2>
+          <label>Account name<input id="accountName" placeholder="Student Alex"></label>
+          <label>Type<select id="accountType"></select></label>
+          <label>Starting balance<input id="accountStart" type="number" step="0.01" value="0"></label>
+          <label>Recorded by<input id="accountActor" value="Teacher"></label>
+          <button class="action" onclick="addAccount()">Add account</button>
+          <p class="hint">Starting balances count as new money created by the classroom central bank.</p>
+        </div>
+        <div class="card">
+          <h2>Account tools</h2>
+          <label>Close account<select id="closeAccountSelect"></select></label>
+          <button class="secondary" onclick="closeAccount()">Close selected account</button>
+          <p class="hint">Only accounts with a zero balance can be closed. That keeps the ledger clean and prevents financial goblins.</p>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <h2>Accounts</h2>
+        <div class="scroll"><table id="accountsTable"></table></div>
+      </div>
+    </section>
+
+    <section class="tab" id="transactions">
+      <div class="grid three">
+        <div class="card">
+          <h2>Transfer money</h2>
+          <label>From<select id="transferFrom"></select></label>
+          <label>To<select id="transferTo"></select></label>
+          <label>Amount<input id="transferAmount" type="number" step="0.01"></label>
+          <label>Memo<input id="transferMemo" placeholder="Payment for class-store item"></label>
+          <label>Recorded by<input id="transferActor" value="Teacher"></label>
+          <button class="action" onclick="recordTransfer()">Record transfer</button>
+        </div>
+        <div class="card">
+          <h2>Issue new currency</h2>
+          <label>To<select id="issueTo"></select></label>
+          <label>Amount<input id="issueAmount" type="number" step="0.01"></label>
+          <label>Reason<input id="issueReason" value="Stimulus / reward / open market buy"></label>
+          <label>Approved by<input id="issueActor" value="Teacher"></label>
+          <button class="action" onclick="issueMoney()">Create money</button>
+        </div>
+        <div class="card">
+          <h2>Remove currency</h2>
+          <label>From<select id="removeFrom"></select></label>
+          <label>Amount<input id="removeAmount" type="number" step="0.01"></label>
+          <label>Reason<input id="removeReason" value="Tax / fine / open market sell"></label>
+          <label>Approved by<input id="removeActor" value="Teacher"></label>
+          <button class="action" onclick="removeMoney()">Destroy money</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <h2>Transaction ledger</h2>
+        <div class="scroll"><table id="transactionsTable"></table></div>
+      </div>
+    </section>
+
+    <section class="tab" id="policy">
+      <div class="grid two">
+        <div class="card">
+          <h2>Policy settings</h2>
+          <label>Currency name<input id="currencyName"></label>
+          <label>Reserve requirement %<input id="reserveRequirement" type="number" step="0.01"></label>
+          <label>Target inflation %<input id="targetInflation" type="number" step="0.01"></label>
+          <label>Policy interest rate %<input id="policyRate" type="number" step="0.01"></label>
+          <label>Discount loan rate %<input id="discountRate" type="number" step="0.01"></label>
+          <label>Max single money issue<input id="maxIssueSingle" type="number" step="0.01"></label>
+          <label>Reason<input id="policyReason" placeholder="Inflation above target"></label>
+          <label>Approved by<input id="policyActor" value="Teacher"></label>
+          <button class="action" onclick="savePolicy()">Save policy changes</button>
+          <p class="hint">Raise rates or remove money when inflation runs hot. Lower rates or issue money when activity is too slow.</p>
+        </div>
+        <div class="card">
+          <h2>Policy history</h2>
+          <div class="scroll"><table id="policyTable"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab" id="loans">
+      <div class="grid two">
+        <div class="card">
+          <h2>Issue discount-window loan</h2>
+          <label>Borrower<select id="loanBorrower"></select></label>
+          <label>Principal<input id="loanPrincipal" type="number" step="0.01"></label>
+          <label>Interest %<input id="loanRate" type="number" step="0.01"></label>
+          <label>Due date<input id="loanDue" type="date"></label>
+          <label>Notes<input id="loanNotes" placeholder="Emergency liquidity"></label>
+          <label>Approved by<input id="loanActor" value="Teacher"></label>
+          <button class="action" onclick="issueLoan()">Issue loan</button>
+        </div>
+        <div class="card">
+          <h2>Record loan payment</h2>
+          <label>Loan<select id="loanPaymentSelect"></select></label>
+          <label>Payment<input id="loanPaymentAmount" type="number" step="0.01"></label>
+          <label>Recorded by<input id="loanPaymentActor" value="Teacher"></label>
+          <button class="action" onclick="payLoan()">Record payment</button>
+          <p class="hint">This class model treats loan payments as money removed from circulation so repayment cools the economy.</p>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <h2>Loan book</h2>
+        <div class="scroll"><table id="loansTable"></table></div>
+      </div>
+    </section>
+
+    <section class="tab" id="prices">
+      <div class="grid two">
+        <div class="card">
+          <h2>Add price to classroom basket</h2>
+          <label>Date<input id="priceDate" type="date"></label>
+          <label>Category<input id="priceCategory" value="Basket"></label>
+          <label>Item<input id="priceItem" placeholder="Pencil"></label>
+          <label>Price<input id="priceValue" type="number" step="0.01"></label>
+          <label>Notes<input id="priceNotes"></label>
+          <button class="action" onclick="addPrice()">Add price</button>
+          <p class="hint">Use the same basket items on different dates to measure inflation.</p>
+        </div>
+        <div class="card">
+          <h2>Price index entries</h2>
+          <div class="scroll"><table id="pricesTable"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab" id="audit">
+      <div class="grid two">
+        <div class="card">
+          <h2>Audit checks</h2>
+          <div class="scroll"><table id="auditTable"></table></div>
+        </div>
+        <div class="card">
+          <h2>Tools</h2>
+          <div class="button-row">
+            <button class="action" onclick="render()">Run audit</button>
+            <button class="secondary" onclick="loadDemoData()">Load demo data</button>
+            <button class="secondary" onclick="exportJSON()">Export JSON backup</button>
+            <button class="secondary" onclick="exportCSV('accounts')">Export accounts CSV</button>
+            <button class="secondary" onclick="exportCSV('transactions')">Export transactions CSV</button>
+            <button class="secondary" onclick="exportCSV('loans')">Export loans CSV</button>
+            <button class="secondary" onclick="exportCSV('prices')">Export prices CSV</button>
+            <button class="secondary" onclick="importJSONPrompt()">Import JSON backup</button>
+            <button class="secondary danger" onclick="clearAllData()">Clear all data</button>
+          </div>
+          <p class="hint">Everything saves in this browser using local storage. Use JSON backup before switching computers.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+
+<script>
+const STORAGE_KEY = "classroomCurrencyFed.v1";
+const ACCOUNT_TYPES = ["Student", "Business", "Bank", "Treasury", "Teacher", "Other"];
+const TAB_INFO = [
+  ["dashboard", "Dashboard"],
+  ["accounts", "Accounts"],
+  ["transactions", "Transactions"],
+  ["policy", "Policy"],
+  ["loans", "Loans"],
+  ["prices", "Price Index"],
+  ["audit", "Audit & Export"]
+];
+
+let state = loadState();
+let currentTab = "dashboard";
+
+function blankState() {
+  return {
+    settings: {
+      currencyName: "ClassBucks",
+      reserveRequirement: 10,
+      targetInflation: 2,
+      policyRate: 3,
+      discountRate: 5,
+      maxIssueSingle: 500
+    },
+    nextIds: { account: 1, transaction: 1, loan: 1, price: 1, policy: 1 },
+    accounts: [],
+    transactions: [],
+    loans: [],
+    prices: [],
+    policyHistory: []
+  };
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return blankState();
+    const parsed = JSON.parse(raw);
+    return Object.assign(blankState(), parsed);
+  } catch (err) {
+    console.warn(err);
+    return blankState();
+  }
+}
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function nowStamp() {
+  return new Date().toISOString().slice(0, 19).replace("T", " ");
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function futureDate(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function money(value) {
+  const n = Number(value || 0);
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function num(id, label, min = null) {
+  const raw = document.getElementById(id).value;
+  const value = Number(String(raw).replace(/,/g, ""));
+  if (!Number.isFinite(value)) throw new Error(`${label} must be a number.`);
+  if (min !== null && value < min) throw new Error(`${label} must be at least ${min}.`);
+  return value;
+}
+
+function text(id) {
+  return document.getElementById(id).value.trim();
+}
+
+function setText(id, value) {
+  document.getElementById(id).value = value;
+}
+
+function accountById(id) {
+  return state.accounts.find(a => a.id === Number(id));
+}
+
+function activeAccounts() {
+  return state.accounts.filter(a => a.active !== false);
+}
+
+function accountName(id) {
+  if (id === null || id === undefined || id === "") return "";
+  const acct = accountById(id);
+  return acct ? acct.name : "Unknown";
+}
+
+function selectedId(id) {
+  const value = document.getElementById(id).value;
+  if (!value) throw new Error("Choose an account.");
+  return Number(value);
+}
+
+function totalSupply() {
+  return activeAccounts().reduce((sum, a) => sum + Number(a.balance || 0), 0);
+}
+
+function totalLoansDue() {
+  return state.loans.filter(l => l.status !== "Paid").reduce((sum, l) => sum + Number(l.balanceDue || 0), 0);
+}
+
+function weeklySupplyChange() {
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  return state.transactions
+    .filter(t => Date.parse(t.createdAt.replace(" ", "T")) >= cutoff)
+    .reduce((sum, t) => sum + Number(t.effect || 0), 0);
+}
+
+function priceAverageForDate(dateValue) {
+  const rows = state.prices.filter(p => p.date === dateValue);
+  if (!rows.length) return null;
+  return rows.reduce((sum, p) => sum + Number(p.price || 0), 0) / rows.length;
+}
+
+function inflationRate() {
+  const dates = [...new Set(state.prices.map(p => p.date))].sort().reverse();
+  if (dates.length < 2) return null;
+  const latest = priceAverageForDate(dates[0]);
+  const previous = priceAverageForDate(dates[1]);
+  if (!latest || !previous) return null;
+  return ((latest / previous) - 1) * 100;
+}
+
+function addTransaction(action, fromId, toId, amount, description, actor, effect) {
+  state.transactions.push({
+    id: state.nextIds.transaction++,
+    createdAt: nowStamp(),
+    action,
+    fromId,
+    toId,
+    amount: Number(amount),
+    description: description || "",
+    actor: actor || "",
+    effect: Number(effect || 0)
+  });
+}
+
+function toast(message) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.style.display = "block";
+  setTimeout(() => { el.style.display = "none"; }, 2800);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c]));
+}
+
+function table(id, columns, rows) {
+  const header = `<thead><tr>${columns.map(c => `<th>${escapeHtml(c[0])}</th>`).join("")}</tr></thead>`;
+  const body = rows.length
+    ? `<tbody>${rows.map(row => `<tr>${columns.map(c => `<td>${escapeHtml(c[1](row))}</td>`).join("")}</tr>`).join("")}</tbody>`
+    : `<tbody><tr><td colspan="${columns.length}">No records yet.</td></tr></tbody>`;
+  document.getElementById(id).innerHTML = header + body;
+}
+
+function buildTabs() {
+  const nav = document.getElementById("tabs");
+  nav.innerHTML = TAB_INFO.map(([id, label]) => `<button onclick="showTab('${id}')" id="tabBtn-${id}">${label}</button>`).join("");
+}
+
+function showTab(id) {
+  currentTab = id;
+  document.querySelectorAll(".tab").forEach(el => el.classList.toggle("active", el.id === id));
+  TAB_INFO.forEach(([tabId]) => {
+    document.getElementById(`tabBtn-${tabId}`).classList.toggle("active", tabId === id);
+  });
+}
+
+function fillSelect(id, options, selected = null) {
+  const el = document.getElementById(id);
+  const current = selected ?? el.value;
+  el.innerHTML = options.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join("");
+  if (options.some(o => String(o.value) === String(current))) el.value = current;
+}
+
+function refreshSelects() {
+  const accountOptions = activeAccounts().map(a => ({ value: a.id, label: `${a.name} [${a.id}]` }));
+  ["closeAccountSelect", "transferFrom", "transferTo", "issueTo", "removeFrom", "loanBorrower"].forEach(id => fillSelect(id, accountOptions));
+  const openLoans = state.loans
+    .filter(l => l.status !== "Paid")
+    .map(l => ({ value: l.id, label: `Loan #${l.id} | ${accountName(l.borrowerId)} | due ${money(l.balanceDue)}` }));
+  fillSelect("loanPaymentSelect", openLoans);
+}
+
+function renderDashboard() {
+  const inf = inflationRate();
+  const metrics = [
+    ["Total money supply", money(totalSupply())],
+    ["7-day supply change", money(weeklySupplyChange())],
+    ["Open loan balance", money(totalLoansDue())],
+    ["Latest inflation", inf === null ? "Need 2 dates" : `${inf.toFixed(2)}%`],
+    ["Reserve requirement", `${state.settings.reserveRequirement}%`],
+    ["Policy rate", `${state.settings.policyRate}%`]
+  ];
+  document.getElementById("metrics").innerHTML = metrics.map(([label, value]) => `
+    <div class="card metric"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>
+  `).join("");
+  document.getElementById("policySignal").textContent = policySignal();
+  table("recentTable", [
+    ["Time", r => r.createdAt], ["Action", r => r.action], ["From", r => r.fromId ? accountName(r.fromId) : "Central Bank"],
+    ["To", r => r.toId ? accountName(r.toId) : "Removed"], ["Amount", r => money(r.amount)], ["Supply effect", r => money(r.effect)]
+  ], [...state.transactions].reverse().slice(0, 12));
+}
+
+function policySignal() {
+  const target = Number(state.settings.targetInflation || 2);
+  const inf = inflationRate();
+  const weekly = weeklySupplyChange();
+  const total = totalSupply();
+  const lines = [];
+  if (inf === null) {
+    lines.push("Enter prices for the same classroom basket on at least two dates. Then the Fed can judge inflation instead of vibes. Vibes are not a monetary policy framework.");
+  } else if (inf > target + 3) {
+    lines.push(`Inflation is running hot at ${inf.toFixed(2)}% against a ${target.toFixed(2)}% target.`);
+    lines.push("Possible tightening moves: raise the policy rate, remove currency through taxes or bond sales, reduce new loans, or increase reserve requirements.");
+  } else if (inf < target - 3) {
+    lines.push(`Inflation is low at ${inf.toFixed(2)}% against a ${target.toFixed(2)}% target.`);
+    lines.push("Possible easing moves: lower the policy rate, issue currency through rewards or purchases, or make discount-window loans easier.");
+  } else {
+    lines.push(`Inflation is near target at ${inf.toFixed(2)}%.`);
+    lines.push("Hold policy steady unless students are hoarding currency or the class store is running out of goods.");
+  }
+  if (total > 0) {
+    const pct = (weekly / total) * 100;
+    lines.push("");
+    lines.push(`Money supply changed by ${pct.toFixed(2)}% over the last 7 days.`);
+    if (pct > 15) lines.push("That is a lot of new money. Watch for price jumps.");
+    if (pct < -15) lines.push("That is a big contraction. Watch for students not having enough currency to trade.");
+  } else {
+    lines.push("");
+    lines.push("No money supply yet. Create accounts or load demo data to begin.");
+  }
+  return lines.join("\n");
+}
+
+function renderAccounts() {
+  table("accountsTable", [
+    ["ID", r => r.id], ["Name", r => r.name], ["Type", r => r.type], ["Balance", r => money(r.balance)], ["Created", r => r.createdAt], ["Status", r => r.active === false ? "Closed" : "Active"]
+  ], state.accounts);
+}
+
+function renderTransactions() {
+  table("transactionsTable", [
+    ["ID", r => r.id], ["Time", r => r.createdAt], ["Action", r => r.action], ["From", r => r.fromId ? accountName(r.fromId) : "Central Bank"],
+    ["To", r => r.toId ? accountName(r.toId) : "Removed"], ["Amount", r => money(r.amount)], ["Supply effect", r => money(r.effect)], ["Memo", r => r.description], ["Actor", r => r.actor]
+  ], [...state.transactions].reverse());
+}
+
+function renderPolicy() {
+  document.getElementById("currencyPill").textContent = `Currency: ${state.settings.currencyName || "ClassBucks"}`;
+  setText("currencyName", state.settings.currencyName);
+  setText("reserveRequirement", state.settings.reserveRequirement);
+  setText("targetInflation", state.settings.targetInflation);
+  setText("policyRate", state.settings.policyRate);
+  setText("discountRate", state.settings.discountRate);
+  setText("maxIssueSingle", state.settings.maxIssueSingle);
+  table("policyTable", [
+    ["Time", r => r.changedAt], ["Policy", r => r.key], ["Old", r => r.oldValue], ["New", r => r.newValue], ["Reason", r => r.reason], ["Actor", r => r.actor]
+  ], [...state.policyHistory].reverse());
+}
+
+function renderLoans() {
+  table("loansTable", [
+    ["ID", r => r.id], ["Borrower", r => accountName(r.borrowerId)], ["Principal", r => money(r.principal)], ["Rate %", r => money(r.rate)],
+    ["Due", r => r.dueDate], ["Balance due", r => money(r.balanceDue)], ["Status", r => r.status], ["Notes", r => r.notes]
+  ], state.loans);
+}
+
+function renderPrices() {
+  table("pricesTable", [
+    ["Date", r => r.date], ["Category", r => r.category], ["Item", r => r.item], ["Price", r => money(r.price)], ["Notes", r => r.notes]
+  ], [...state.prices].sort((a, b) => b.date.localeCompare(a.date) || a.item.localeCompare(b.item)));
+}
+
+function auditChecks() {
+  const checks = [];
+  const negatives = activeAccounts().filter(a => Number(a.balance) < 0);
+  if (negatives.length) negatives.forEach(a => checks.push(["Critical", "Negative balance", `${a.name} has ${money(a.balance)}.`]));
+  else checks.push(["OK", "No negative balances", "All active accounts have zero or positive balances."]);
+
+  const overdue = state.loans.filter(l => l.status !== "Paid" && l.dueDate && l.dueDate < today());
+  if (overdue.length) overdue.forEach(l => checks.push(["Warning", "Overdue loan", `Loan #${l.id} for ${accountName(l.borrowerId)} is due ${l.dueDate} with ${money(l.balanceDue)} remaining.`]));
+  else checks.push(["OK", "No overdue loans", "No open loans are past their due date."]);
+
+  const maxIssue = Number(state.settings.maxIssueSingle || 500);
+  const large = state.transactions.filter(t => ["ISSUE CURRENCY", "LOAN ISSUE", "STARTING BALANCE"].includes(t.action) && Number(t.amount) > maxIssue);
+  if (large.length) large.forEach(t => checks.push(["Warning", "Large money creation", `Transaction #${t.id} created ${money(t.amount)}, above the current limit of ${money(maxIssue)}.`]));
+  else checks.push(["OK", "Money creation within limit", `No single issue exceeded ${money(maxIssue)}.`]);
+
+  const reserveReq = Number(state.settings.reserveRequirement || 10) / 100;
+  const bankBalances = activeAccounts().filter(a => a.type === "Bank").reduce((sum, a) => sum + Number(a.balance || 0), 0);
+  const requiredReserve = totalSupply() * reserveReq;
+  if (bankBalances < requiredReserve) checks.push(["Warning", "Reserve shortfall", `Bank accounts hold ${money(bankBalances)}. Policy requires about ${money(requiredReserve)}.`]);
+  else checks.push(["OK", "Reserve coverage", `Bank accounts hold ${money(bankBalances)} against required reserves of ${money(requiredReserve)}.`]);
+
+  const inf = inflationRate();
+  const target = Number(state.settings.targetInflation || 2);
+  if (inf === null) checks.push(["Info", "Inflation unknown", "Enter at least two price index dates to calculate inflation."]);
+  else if (inf > target + 3) checks.push(["Warning", "Inflation above target", `Latest inflation is ${inf.toFixed(2)}%, above the ${target.toFixed(2)}% target.`]);
+  else if (inf < target - 3) checks.push(["Info", "Inflation below target", `Latest inflation is ${inf.toFixed(2)}%, below the ${target.toFixed(2)}% target.`]);
+  else checks.push(["OK", "Inflation near target", `Latest inflation is ${inf.toFixed(2)}% against a ${target.toFixed(2)}% target.`]);
+  return checks;
+}
+
+function renderAudit() {
+  const rows = auditChecks().map(([level, check, details]) => ({ level, check, details }));
+  table("auditTable", [
+    ["Level", r => r.level], ["Check", r => r.check], ["Details", r => r.details]
+  ], rows);
+  document.querySelectorAll("#auditTable tbody tr td:first-child").forEach(td => {
+    td.className = td.textContent.toLowerCase();
+  });
+}
+
+function render() {
+  saveState();
+  refreshSelects();
+  renderDashboard();
+  renderAccounts();
+  renderTransactions();
+  renderPolicy();
+  renderLoans();
+  renderPrices();
+  renderAudit();
+  showTab(currentTab);
+}
+
+function addAccount() {
+  try {
+    const name = text("accountName");
+    if (!name) throw new Error("Account name is required.");
+    if (state.accounts.some(a => a.name.toLowerCase() === name.toLowerCase())) throw new Error("Account name already exists.");
+    const starting = num("accountStart", "Starting balance", 0);
+    const account = {
+      id: state.nextIds.account++,
+      name,
+      type: document.getElementById("accountType").value,
+      balance: starting,
+      createdAt: nowStamp(),
+      active: true
+    };
+    state.accounts.push(account);
+    if (starting > 0) addTransaction("STARTING BALANCE", null, account.id, starting, "Initial currency assignment", text("accountActor"), starting);
+    setText("accountName", "");
+    setText("accountStart", "0");
+    render();
+    toast("Account added.");
+  } catch (err) { alert(err.message); }
+}
+
+function closeAccount() {
+  try {
+    const id = selectedId("closeAccountSelect");
+    const acct = accountById(id);
+    if (!acct) throw new Error("Account not found.");
+    if (Number(acct.balance) !== 0) throw new Error("Set the balance to zero before closing this account.");
+    if (!confirm(`Close ${acct.name}?`)) return;
+    acct.active = false;
+    render();
+    toast("Account closed.");
+  } catch (err) { alert(err.message); }
+}
+
+function recordTransfer() {
+  try {
+    const fromId = selectedId("transferFrom");
+    const toId = selectedId("transferTo");
+    if (fromId === toId) throw new Error("Choose two different accounts.");
+    const amount = num("transferAmount", "Amount", 0.01);
+    const from = accountById(fromId);
+    const to = accountById(toId);
+    if (!from || !to) throw new Error("Account not found.");
+    if (Number(from.balance) < amount) throw new Error(`${from.name} does not have enough money.`);
+    from.balance = Number(from.balance) - amount;
+    to.balance = Number(to.balance) + amount;
+    addTransaction("TRANSFER", fromId, toId, amount, text("transferMemo"), text("transferActor"), 0);
+    setText("transferAmount", "");
+    setText("transferMemo", "");
+    render();
+    toast("Transfer recorded.");
+  } catch (err) { alert(err.message); }
+}
+
+function issueMoney() {
+  try {
+    const toId = selectedId("issueTo");
+    const amount = num("issueAmount", "Amount", 0.01);
+    const maxIssue = Number(state.settings.maxIssueSingle || 500);
+    if (amount > maxIssue && !confirm(`This creates ${money(amount)}, above the limit of ${money(maxIssue)}. Continue?`)) return;
+    const to = accountById(toId);
+    if (!to) throw new Error("Account not found.");
+    to.balance = Number(to.balance) + amount;
+    addTransaction("ISSUE CURRENCY", null, toId, amount, text("issueReason") || "Central bank issued currency", text("issueActor"), amount);
+    setText("issueAmount", "");
+    render();
+    toast("Currency created.");
+  } catch (err) { alert(err.message); }
+}
+
+function removeMoney() {
+  try {
+    const fromId = selectedId("removeFrom");
+    const amount = num("removeAmount", "Amount", 0.01);
+    const from = accountById(fromId);
+    if (!from) throw new Error("Account not found.");
+    if (Number(from.balance) < amount) throw new Error(`${from.name} does not have enough money.`);
+    from.balance = Number(from.balance) - amount;
+    addTransaction("REMOVE CURRENCY", fromId, null, amount, text("removeReason") || "Central bank removed currency", text("removeActor"), -amount);
+    setText("removeAmount", "");
+    render();
+    toast("Currency removed.");
+  } catch (err) { alert(err.message); }
+}
+
+function savePolicy() {
+  try {
+    const incoming = {
+      currencyName: text("currencyName") || "ClassBucks",
+      reserveRequirement: num("reserveRequirement", "Reserve requirement", 0),
+      targetInflation: num("targetInflation", "Target inflation", 0),
+      policyRate: num("policyRate", "Policy interest rate", 0),
+      discountRate: num("discountRate", "Discount loan rate", 0),
+      maxIssueSingle: num("maxIssueSingle", "Max single money issue", 0)
+    };
+    Object.entries(incoming).forEach(([key, newValue]) => {
+      const oldValue = state.settings[key];
+      if (String(oldValue) !== String(newValue)) {
+        state.policyHistory.push({
+          id: state.nextIds.policy++,
+          changedAt: nowStamp(),
+          key,
+          oldValue,
+          newValue,
+          reason: text("policyReason"),
+          actor: text("policyActor")
+        });
+        state.settings[key] = newValue;
+      }
+    });
+    render();
+    toast("Policy saved.");
+  } catch (err) { alert(err.message); }
+}
+
+function issueLoan() {
+  try {
+    const borrowerId = selectedId("loanBorrower");
+    const principal = num("loanPrincipal", "Principal", 0.01);
+    const rate = num("loanRate", "Interest", 0);
+    const dueDate = text("loanDue");
+    if (!dueDate) throw new Error("Due date is required.");
+    const borrower = accountById(borrowerId);
+    if (!borrower) throw new Error("Borrower not found.");
+    const balanceDue = Math.round(principal * (1 + rate / 100) * 100) / 100;
+    state.loans.push({
+      id: state.nextIds.loan++,
+      borrowerId,
+      principal,
+      rate,
+      balanceDue,
+      issuedAt: nowStamp(),
+      dueDate,
+      status: "Open",
+      notes: text("loanNotes")
+    });
+    borrower.balance = Number(borrower.balance) + principal;
+    addTransaction("LOAN ISSUE", null, borrowerId, principal, text("loanNotes") || "Central bank loan", text("loanActor"), principal);
+    setText("loanPrincipal", "");
+    setText("loanNotes", "");
+    render();
+    toast("Loan issued.");
+  } catch (err) { alert(err.message); }
+}
+
+function payLoan() {
+  try {
+    const loanId = Number(document.getElementById("loanPaymentSelect").value);
+    if (!loanId) throw new Error("Choose an open loan.");
+    const payment = num("loanPaymentAmount", "Payment", 0.01);
+    const loan = state.loans.find(l => l.id === loanId && l.status !== "Paid");
+    if (!loan) throw new Error("Open loan not found.");
+    const borrower = accountById(loan.borrowerId);
+    if (!borrower) throw new Error("Borrower not found.");
+    const actual = Math.min(payment, Number(loan.balanceDue));
+    if (Number(borrower.balance) < actual) throw new Error(`${borrower.name} does not have enough money.`);
+    borrower.balance = Number(borrower.balance) - actual;
+    loan.balanceDue = Math.round((Number(loan.balanceDue) - actual) * 100) / 100;
+    if (loan.balanceDue <= 0) { loan.balanceDue = 0; loan.status = "Paid"; }
+    addTransaction("LOAN PAYMENT", loan.borrowerId, null, actual, `Payment on loan #${loan.id}`, text("loanPaymentActor"), -actual);
+    setText("loanPaymentAmount", "");
+    render();
+    toast("Payment recorded.");
+  } catch (err) { alert(err.message); }
+}
+
+function addPrice() {
+  try {
+    const dateValue = text("priceDate");
+    if (!dateValue) throw new Error("Date is required.");
+    const item = text("priceItem");
+    if (!item) throw new Error("Item is required.");
+    const price = num("priceValue", "Price", 0);
+    state.prices.push({
+      id: state.nextIds.price++,
+      date: dateValue,
+      category: text("priceCategory"),
+      item,
+      price,
+      notes: text("priceNotes"),
+      createdAt: nowStamp()
+    });
+    setText("priceItem", "");
+    setText("priceValue", "");
+    setText("priceNotes", "");
+    render();
+    toast("Price added.");
+  } catch (err) { alert(err.message); }
+}
+
+function loadDemoData() {
+  try {
+    if (state.accounts.length && !confirm("This will add demo data to your current database. Continue?")) return;
+    const demoAccounts = [
+      ["Class Treasury", "Treasury", 0],
+      ["Classroom Bank", "Bank", 500],
+      ["Student Alex", "Student", 100],
+      ["Student Jordan", "Student", 100],
+      ["Student Riley", "Student", 100],
+      ["Class Store", "Business", 250]
+    ];
+    demoAccounts.forEach(([name, type, balance]) => {
+      if (state.accounts.some(a => a.name === name)) return;
+      const account = { id: state.nextIds.account++, name, type, balance, createdAt: nowStamp(), active: true };
+      state.accounts.push(account);
+      if (balance > 0) addTransaction("STARTING BALANCE", null, account.id, balance, "Demo initial currency", "Demo", balance);
+    });
+    const oldDate = (() => { const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10); })();
+    const newDate = today();
+    [["Snack", "Pencil", 2.00, 2.10], ["Prize", "Homework Pass", 10.00, 11.00], ["Prize", "Sticker", 1.00, 1.20], ["Privilege", "Seat Choice", 8.00, 8.80]].forEach(([category, item, oldPrice, newPrice]) => {
+      state.prices.push({ id: state.nextIds.price++, date: oldDate, category, item, price: oldPrice, notes: "Demo basket old price", createdAt: nowStamp() });
+      state.prices.push({ id: state.nextIds.price++, date: newDate, category, item, price: newPrice, notes: "Demo basket new price", createdAt: nowStamp() });
+    });
+    render();
+    toast("Demo data loaded.");
+  } catch (err) { alert(err.message); }
+}
+
+function csvEscape(value) {
+  const s = String(value ?? "");
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function rowsFor(name) {
+  if (name === "accounts") return state.accounts.map(a => ({ id: a.id, name: a.name, type: a.type, balance: a.balance, createdAt: a.createdAt, active: a.active }));
+  if (name === "transactions") return state.transactions.map(t => ({ id: t.id, createdAt: t.createdAt, action: t.action, from: accountName(t.fromId), to: accountName(t.toId), amount: t.amount, description: t.description, actor: t.actor, moneySupplyEffect: t.effect }));
+  if (name === "loans") return state.loans.map(l => ({ id: l.id, borrower: accountName(l.borrowerId), principal: l.principal, rate: l.rate, balanceDue: l.balanceDue, issuedAt: l.issuedAt, dueDate: l.dueDate, status: l.status, notes: l.notes }));
+  if (name === "prices") return state.prices.map(p => ({ id: p.id, date: p.date, category: p.category, item: p.item, price: p.price, notes: p.notes, createdAt: p.createdAt }));
+  return [];
+}
+
+function download(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV(name) {
+  const rows = rowsFor(name);
+  if (!rows.length) { alert("No rows to export."); return; }
+  const headers = Object.keys(rows[0]);
+  const csv = [headers.join(","), ...rows.map(row => headers.map(h => csvEscape(row[h])).join(","))].join("\n");
+  download(`classroom_fed_${name}_${today()}.csv`, csv, "text/csv;charset=utf-8");
+}
+
+function exportJSON() {
+  download(`classroom_fed_backup_${today()}.json`, JSON.stringify(state, null, 2), "application/json;charset=utf-8");
+}
+
+function importJSONPrompt() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.onchange = () => {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!parsed.accounts || !parsed.transactions || !parsed.settings) throw new Error("That does not look like a Classroom Fed backup.");
+        state = Object.assign(blankState(), parsed);
+        render();
+        toast("Backup imported.");
+      } catch (err) { alert(err.message); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+function clearAllData() {
+  if (!confirm("Clear all Classroom Fed data stored in this browser?")) return;
+  if (!confirm("Really clear everything? This cannot be undone unless you exported a JSON backup.")) return;
+  state = blankState();
+  render();
+  toast("Data cleared.");
+}
+
+function init() {
+  buildTabs();
+  fillSelect("accountType", ACCOUNT_TYPES.map(t => ({ value: t, label: t })), "Student");
+  document.getElementById("priceDate").value = today();
+  document.getElementById("loanDue").value = futureDate(14);
+  render();
+  showTab("dashboard");
+}
+
+init();
+</script>
+</body>
+</html>

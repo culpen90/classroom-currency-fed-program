@@ -1,0 +1,13 @@
+.agents/
+.codex/
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+classroom_central_bank_data.json
+*.backup.json
+*.bak
+
+.DS_Store
+Thumbs.db
